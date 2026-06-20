@@ -1,4 +1,4 @@
-import logging, time, yaml, os, shutil
+import logging, time, yaml, os, shutil, argparse
 import numpy as np
 import torch
 from torch import nn
@@ -349,4 +349,7 @@ def main(*args, input_file='input.yaml', load_model=None, load_checkpoint=None, 
         trainer.fit(lit_model, datamodule=dataset)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_file", type=str, default="input.yaml", help="input file path")
+    args = parser.parse_args()
+    main(input_file=args.input_file)

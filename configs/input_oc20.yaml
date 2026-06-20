@@ -1,0 +1,60 @@
+cutoff: 6
+max_neigh: 20
+seed: 666
+device: 'cuda'
+Data:
+  type: pt    # ase for ".traj" or pt for ".pt"
+  path: .
+  trainBatch: 8
+  testBatch: 8
+  evalBatch: 1
+  trainSet: ../dataset/data_oc20/train/data.pt  # your_oc20_train_set_path
+  testSet: ../dataset/data_oc20/val/data.pt   # your_oc20_valid_set_path
+  evalSet: ../dataset/data_oc20/test/data.pt   # your_oc20_test_set_path
+  numWorkers: 8
+  pinMemory: True
+  mean_pos: 0.0
+  mean_cell: 0.0
+  std_pos: 1.0
+  std_cell: 1.0
+  nNeighbor: 19.4
+  elements: [1, 5, 6, 7, 8, 11, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 55, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83]
+Model:
+  convMode: node_edge
+  updateEdge: True
+  mode: simple
+  nLayer: 6
+  activateFn: silu
+  nEmbedding: 256
+  nHidden: 256
+  maxRWay: 2
+  maxOutWay: 2
+  CutoffLayer:
+    type: poly
+    p: 5
+  RadialLayer:
+    type: besselMLP
+    nBasis: 8
+    nHidden: [256, 256]
+    activateFn: silu
+Train:
+  warmupSteps: 500
+  allowMissing: False
+  targetProp: ["direct_pos"] 
+  weight: [1.0]
+  loss: mae
+  maxEpoch: 100
+  maxStep: 10000000
+  logInterval: 1
+  evalEpochInterval: 1
+  evalStepInterval: 1.0
+  gradClip: 150
+  Optimizer: 
+    type: AdamW
+    amsGrad: True
+    weightDecay: !!float 0
+    learningRate: !!float 5.12e-4
+  LrScheduler:
+    type: reduceOnPlateau
+    lrFactor: 0.8
+    patience: 5

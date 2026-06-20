@@ -1,0 +1,60 @@
+cutoff: 6
+max_neigh: 20
+seed: 666
+device: 'cuda'
+Data:
+  type: pt    # ase for ".traj" or pt for ".pt"
+  path: .
+  trainBatch: 16
+  testBatch: 16
+  evalBatch: 1
+  trainSet: ../dataset/data_xmno/train/data.pt  # your_xmno_train_set_path
+  testSet: ../dataset/data_xmno/val/data.pt   # your_xmno_valid_set_path
+  evalSet: ../dataset/data_xmno/test/data.pt   # your_xmno_test_set_path
+  numWorkers: 8
+  pinMemory: True
+  mean_pos: 0.0
+  mean_cell: 0.0
+  std_pos: 1.0
+  std_cell: 1.0
+  nNeighbor: 20.0
+  elements: [8,12,20,25,38,56]
+Model:
+  convMode: node_edge
+  updateEdge: True
+  mode: simple
+  nLayer: 6
+  activateFn: silu
+  nEmbedding: 256
+  nHidden: 256
+  maxRWay: 2
+  maxOutWay: 2
+  CutoffLayer:
+    type: poly
+    p: 5
+  RadialLayer:
+    type: besselMLP
+    nBasis: 8
+    nHidden: [256, 256]
+    activateFn: silu
+Train:
+  warmupSteps: 500
+  allowMissing: False
+  targetProp: ["direct_pos", "direct_cell"] 
+  weight: [1.0, 1.0]
+  loss: mae
+  maxEpoch: 300
+  maxStep: 10000000
+  logInterval: 1
+  evalEpochInterval: 1
+  evalStepInterval: 1.0
+  gradClip: 150
+  Optimizer: 
+    type: AdamW
+    amsGrad: True
+    weightDecay: !!float 0
+    learningRate: !!float 5.12e-4
+  LrScheduler:
+    type: reduceOnPlateau
+    lrFactor: 0.8
+    patience: 5

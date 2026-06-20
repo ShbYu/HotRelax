@@ -1,0 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cu118
+numpy==2.1.2
+ase==3.26.0
+PyYAML==6.0.2
+torch==2.6.0+cu118
+torchaudio==2.6.0+cu118
+torchvision==0.21.0+cu118
+lightning==2.5.5
+tensorboard==2.20.0
+pandas==2.0.1
+pymatgen==2025.10.7

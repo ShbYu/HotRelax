@@ -1,0 +1,60 @@
+cutoff: 6
+max_neigh: 20
+seed: 666
+device: 'cuda'
+Data:
+  type: pt    # ase for ".traj" or pt for ".pt"
+  path: .
+  trainBatch: 4
+  testBatch: 4
+  evalBatch: 1
+  trainSet: ../dataset/data_2dmd/train/data.pt   # your_2dmd_train_set_path
+  testSet: ../dataset/data_2dmd/val/data.pt    # your_2dmd_valid_set_path
+  evalSet: ../dataset/data_2dmd/test/data.pt    # your_2dmd_test_set_path
+  numWorkers: 8
+  pinMemory: True
+  mean_pos: 0.0
+  mean_cell: 0.0
+  std_pos: 1.0
+  std_cell: 1.0
+  nNeighbor: 19.6
+  elements: [5, 6, 7, 15, 16, 31, 34, 42, 49, 74]
+Model:
+  convMode: node_edge
+  updateEdge: True
+  mode: simple
+  nLayer: 6
+  activateFn: silu
+  nEmbedding: 256
+  nHidden: 256
+  maxRWay: 2
+  maxOutWay: 2
+  CutoffLayer:
+    type: poly
+    p: 5
+  RadialLayer:
+    type: besselMLP
+    nBasis: 8
+    nHidden: [256, 256]
+    activateFn: silu
+Train:
+  warmupSteps: 500
+  allowMissing: False
+  targetProp: ["direct_pos"] 
+  weight: [1.0]
+  loss: mae
+  maxEpoch: 300
+  maxStep: 10000000
+  logInterval: 1
+  evalEpochInterval: 1
+  evalStepInterval: 1.0
+  gradClip: 150
+  Optimizer: 
+    type: AdamW
+    amsGrad: True
+    weightDecay: !!float 0
+    learningRate: !!float 5.12e-4
+  LrScheduler:
+    type: reduceOnPlateau
+    lrFactor: 0.8
+    patience: 5

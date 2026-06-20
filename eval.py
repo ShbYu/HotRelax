@@ -9,36 +9,15 @@ from ase import Atoms
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.io.ase import AseAtomsAdaptor
 from ase.io.trajectory import Trajectory
+import argparse
 import time
 
 
-def eval(model, data_loader, properties, device):
-    output = {prop: [] for prop in properties}
-    target = {prop: [] for prop in properties}
-    n_atoms = []
-    for batch_data in data_loader:
-        batch_data = {key: value.to(device) for key, value in batch_data.items()}
-        model(batch_data, properties, create_graph=False)
-        n_atoms.extend(batch_data['n_atoms'].detach().cpu().numpy())
-        for prop in properties:
-            output[prop].extend(batch_data[f'{prop}_p'].detach().cpu().numpy())
-            if f'{prop}_t' in batch_data:
-                target[prop].extend(batch_data[f'{prop}_t'].detach().cpu().numpy())
-    for prop in properties:
-        np.save(f'output_{prop}.npy', np.array(output[prop]))
-        np.save(f'target_{prop}.npy', np.array(target[prop]))
-    np.save('n_atoms.npy', np.array(n_atoms))
-    return None
-
-
-def eval_direct(model, data_loader, properties, device, translate=True, output="results.txt"):
+def eval(model, data_loader, properties, device, output="results.txt"):
     with open(output, 'w') as fileobj:
-        fileobj.write('cif_id\tmae_pos_dummy\tmae_pos_pred\tmae_cell_dummy\tmae_cell_pred\tmae_volume_dummy\tmae_volume_pred\tmatch_rate\ttime\n')
+        fileobj.write('cif_id\tmae_pos_dummy\tmae_pos_pred\tmae_cell_dummy\tmae_cell_pred\tmatch_rate\ttime\n')
     
-    if translate:
-        pred_traj = Trajectory(f"pred_test.traj", 'a')
-    else:
-        pred_traj = Trajectory(f"pred_test_direct.traj", 'a')
+    pred_traj = Trajectory(f"pred_test.traj", 'a')
     for batch_data in data_loader:
         batch_data = {key: value.to(device) for key, value in batch_data.items()}
         start_time = time.time()
@@ -54,9 +33,6 @@ def eval_direct(model, data_loader, properties, device, translate=True, output="
 
         pos_relax = (batch_data["direct_pos_t"] + pos_unrelax) @ cell_uinv @ cell_relax
         pos_pred = pred_pos @ cell_uinv @ pred_cell
-        if translate:
-            tran_vec = torch.mean(pos_relax - pos_pred, dim=0, keepdim=True)
-            pos_pred += tran_vec
 
         end_time = time.time()
         compute_time = end_time - start_time
@@ -78,20 +54,18 @@ def eval_direct(model, data_loader, properties, device, translate=True, output="
         mae_pos_pred = (pos_relax - pos_pred).abs().mean().item()
         mae_cell_dummy = (cell_relax - cell_unrelax).abs().mean().item()
         mae_cell_pred = (cell_relax - pred_cell).abs().mean().item()
-        mae_volume_dummy = (volume_relax - volume_unrelax).abs().mean().item()
-        mae_volume_pred = (volume_relax - pred_volume).abs().mean().item()
 
         with open(output, 'a') as fileobj:
             content = str(name)+'\t'+str(mae_pos_dummy)+'\t'
-            content += str(mae_pos_pred)+'\t'+str(mae_cell_dummy)+'\t'+str(mae_cell_pred)+'\t'+str(mae_volume_dummy)+'\t'
-            content += str(mae_volume_pred)+'\t'+str(match_rate)+'\t'+str(compute_time)+'\n'
+            content += str(mae_pos_pred)+'\t'+str(mae_cell_dummy)+'\t'+str(mae_cell_pred)+'\t'
+            content += str(match_rate)+'\t'+str(compute_time)+'\n'
             fileobj.write(content)
     pred_traj.close()
 
     return None
 
 
-def main(*args, modelfile='./outDir/best.pt', indices=None, input_file="input.yaml", 
+def main(*args, model_file='./outDir/best.pt', indices=None, input_file="input.yaml", 
          spin=False, pin_memory=True, **kwargs):
     if indices is not None:
         indices = np.loadtxt(indices, dtype=int)
@@ -106,7 +80,7 @@ def main(*args, modelfile='./outDir/best.pt', indices=None, input_file="input.ya
     batchsize = eval_dict["Data"]["evalBatch"]
     num_workers = eval_dict["Data"]["numWorkers"]
 
-    model = torch.load(modelfile, map_location=device, weights_only=False)
+    model = torch.load(model_file, map_location=device, weights_only=False)
     model.eval()
 
     dataset = get_dataset(cutoff=cutoff,
@@ -122,8 +96,11 @@ def main(*args, modelfile='./outDir/best.pt', indices=None, input_file="input.ya
                              collate_fn=atoms_collate_fn,
                              num_workers=num_workers,
                              pin_memory=pin_memory)
-    eval_direct(model, data_loader, properties, device)
-    eval_direct(model, data_loader, properties, device, translate=False, output="results_direct.txt")
+    eval(model, data_loader, properties, device)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_file", type=str, default="input.yaml", help="input file path")
+    parser.add_argument("--model_file", type=str, default="./outDir/best.pt", help="trained model path")
+    args = parser.parse_args()
+    main(model_file=args.model_file, input_file=args.input_file)
