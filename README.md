@@ -18,19 +18,19 @@ We provide the code for training the base model setting on the X-Mn-O, MP, C2DB,
 
 - Use conda to create a new environment named `hotrelax`:
 ```
-    conda env create -n hotrelax python==3.10
+conda env create -n hotrelax python==3.10
 ```
 
 - Please ensure that your Python version is at least 3.8.
 
 - Activate the environment:
 ```
-    conda activate hotrelax
+conda activate hotrelax
 ```
 
 - Then install the required package versions:
 ```
-    pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
 
@@ -52,7 +52,7 @@ The datasets can be downloaded from [Zenodo](https://zenodo.org/records/20772345
 
 We recommend converting the data into `.pt` format to speed up preprocessing during training. Use the following command, and replace `your_data_path` with the actual path to your data:
 ```
-    python transform.py your_data_path
+python transform.py your_data_path
 ```
 
 
@@ -61,7 +61,7 @@ We recommend converting the data into `.pt` format to speed up preprocessing dur
 Train HotRelax by running:
 
 ```
-    python train.py --input_file input.yaml
+python train.py --input_file input.yaml
 ```
 For different datasets, you only need to modify `input.yaml`. The hyperparameters that may need to be adjusted include `trainBatch`, `testBatch`, `trainSet`, `testSet`, `evalSet`, `numWorkers`, and `elements`.
 For convenience, we provide input files for each dataset in the [`configs`](configs) folder.
@@ -71,7 +71,7 @@ For convenience, we provide input files for each dataset in the [`configs`](conf
 
 After training, the best model will be saved at `./outDir/best.pt`. You can evaluate HotRelax by running:
 ```
-    python eval.py --input_file input.yaml --model_file ./outDir/best.pt
+python eval.py --input_file input.yaml --model_file ./outDir/best.pt
 ```
 This command will generate a result file named `results.txt`, which includes the coordinate MAE, lattice MAE, match rate, and inference time for each structure.
 
