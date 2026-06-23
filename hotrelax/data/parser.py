@@ -32,12 +32,24 @@ class DatasetParser:
         )
 
     def get_dataset(self) -> AtomsDataset:
+        """
+        Build the dataset object from parser configuration.
+
+        Args:
+            None.
+
+        Returns:
+            Instantiated atomistic dataset.
+        """
         return get_dataset(
             datapath=self.get_datapath(),
             cutoff=self.p_dict['cutoff'],
             properties=self.p_dict['Train']['targetProp'],
             spin=self.p_dict['Model']['Spin'],
             datatype=self.data_dict["type"],
+            add_feat=self.data_dict.get("addFeat", False),
+            feat_json=self.data_dict.get("featJson"),
+            use_cycle=self.data_dict.get("useCycle", False),
         )
 
     def split_dataset(self, dataset: AtomsDataset) -> Tuple[AtomsDataset, AtomsDataset]:
@@ -119,11 +131,23 @@ class ASEParser(DatasetParser):
         return None
 
     def get_dataset(self):
+        """
+        Build an ASE dataset from parser configuration.
+
+        Args:
+            None.
+
+        Returns:
+            ASE dataset instance.
+        """
         return ASEData(
-            datapath=self.get_datapath(),
+            frames=self.get_datapath(),
             cutoff=self.p_dict['cutoff'],
             properties=self.p_dict['Train']['targetProp'],
             spin=self.p_dict['Model']['Spin'],
+            add_feat=self.data_dict.get("addFeat", False),
+            feat_json=self.data_dict.get("featJson"),
+            use_cycle=self.data_dict.get("useCycle", False),
         )
 
     def split_by_set(self, dataset):

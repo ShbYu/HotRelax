@@ -43,6 +43,9 @@ DefaultPara = {
             "pinMemory": False,
             "batchType": "structure",
             "meta": None,
+            "addFeat": False,
+            "featJson": None,
+            "useCycle": False,
         },
         "Model": {
             "net": "miao",

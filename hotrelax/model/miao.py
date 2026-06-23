@@ -202,17 +202,45 @@ class MiaoNet(nn.Module):
                                         bilinear=bilinear,
                                         e_dim=embedding_layer.n_channel,
                                         )
+        self.graph_feat_encoder = nn.Sequential(
+            nn.LazyLinear(hidden_nodes[-1]),
+            nn.SiLU(),
+            nn.Linear(hidden_nodes[-1], hidden_nodes[-1]),
+            nn.SiLU(),
+        )
+        self.graph_context_layer = nn.Sequential(
+            nn.Linear(hidden_nodes[-1] * 2, hidden_nodes[-1]),
+            nn.SiLU(),
+        )
+        self.graph_pos_layer = nn.Sequential(
+            nn.Linear(hidden_nodes[-1] * 2, hidden_nodes[-1]),
+            nn.SiLU(),
+            nn.Linear(hidden_nodes[-1], 3),
+        )
+        self.graph_cell_layer = nn.Sequential(
+            nn.Linear(hidden_nodes[-1], hidden_nodes[-1]),
+            nn.SiLU(),
+            nn.Linear(hidden_nodes[-1], 9),
+        )
         # TensorAggregateOP.set_max(max(max_in_way), max(max_out_way), max(max_r_way))
 
     def forward(self,
                 batch_data   : Dict[str, torch.Tensor],
-                properties   : Optional[List[str]]=None,
-                create_graph : bool = True,
                 ) -> Dict[str, torch.Tensor]:
-        
+        """
+        Run the Miao network forward pass.
+
+        Args:
+            batch_data: Batched structure tensors.
+            properties: Requested property names.
+            create_graph: Whether to build higher-order autograd graph.
+
+        Returns:
+            Batch dictionary with prediction tensors appended.
+        """
         batch_data["direct_pos_p"] = []
         batch_data["direct_cell_p"] = []
-        
+
         idx_i, idx_j = batch_data["idx_i"], batch_data["idx_j"]
         abc_unsqueeze = batch_data["cell_u"].repeat_interleave(batch_data["n_edges"], dim=0)
         batch_data["rij"] = batch_data["pos_u"][idx_j] + torch.einsum("a p, a p v -> a v", \
@@ -223,14 +251,37 @@ class MiaoNet(nn.Module):
             node_info, edge_info = en_equivalent(node_info, edge_info, batch_data)
         output_tensors = self.readout_layer(node_info, batch_data)
 
-        batch_data["direct_pos_p"].append(output_tensors["direct_pos"] * self.std_pos + self.mean_pos)
-        batch_data["direct_cell_p"].append(_scatter_add(output_tensors['direct_cell'], batch_data['batch']) * self.std_cell + self.mean_cell)
+        direct_pos = output_tensors["direct_pos"] * self.std_pos + self.mean_pos
+        direct_cell = _scatter_add(output_tensors['direct_cell'], batch_data['batch']) * self.std_cell + self.mean_cell
+
+        if "graph_feat" in batch_data:
+            graph_context = self.get_graph_context(node_info, batch_data)
+            direct_pos = direct_pos + self.get_graph_pos_shift(node_info, graph_context, batch_data)
+            direct_cell = direct_cell + self.graph_cell_layer(graph_context).view(-1, 3, 3)
+
+        batch_data["direct_pos_p"].append(direct_pos)
+        batch_data["direct_cell_p"].append(direct_cell)
+
+        if "cycle_basis" in batch_data and "cycle_offset" in batch_data:
+            batch_data["cycle_residual_p"] = [
+                self.get_cycle_residual(direct_pos, direct_cell, batch_data)
+            ]
+            batch_data["cycle_residual_t"] = torch.zeros_like(batch_data["cycle_residual_p"][-1])
 
         return batch_data
 
     def get_init_info(self,
                       batch_data : Dict[str, torch.Tensor],
                       )->Tuple[Dict[int, torch.Tensor], Dict[int, torch.Tensor]]:
+        """
+        Build initial node and edge representations.
+
+        Args:
+            batch_data: Batched structure tensors.
+
+        Returns:
+            Initial node tensor dict and edge tensor dict.
+        """
         emb = self.embedding_layer(batch_data=batch_data)
         node_info = {0: emb}
         _, dij, _ = find_distances(batch_data)
@@ -238,8 +289,97 @@ class MiaoNet(nn.Module):
         edge_info = {0: rbf}
         return node_info, edge_info
 
+    def get_graph_context(self,
+                          node_info : Dict[int, torch.Tensor],
+                          batch_data: Dict[str, torch.Tensor],
+                          ) -> torch.Tensor:
+        """
+        Build graph-level conditioning vectors from learned node states and handcrafted features.
+
+        Args:
+            node_info: Final node tensor dictionary.
+            batch_data: Batched structure tensors.
+
+        Returns:
+            Graph-level conditioning tensor.
+        """
+        node_scalar = node_info[self.target_way.get("direct_cell", 0)]
+        graph_embed = _scatter_add(node_scalar, batch_data["batch"])
+        n_atoms = batch_data["n_atoms"].to(graph_embed.dtype).unsqueeze(-1)
+        graph_embed = graph_embed / n_atoms
+        graph_feat = self.graph_feat_encoder(batch_data["graph_feat"])
+        return self.graph_context_layer(torch.cat([graph_embed, graph_feat], dim=1))
+
+    def get_graph_pos_shift(self,
+                            node_info : Dict[int, torch.Tensor],
+                            graph_context: torch.Tensor,
+                            batch_data: Dict[str, torch.Tensor],
+                            ) -> torch.Tensor:
+        """
+        Predict graph-conditioned residual shifts for atomic positions.
+
+        Args:
+            node_info: Final node tensor dictionary.
+            graph_context: Graph-level conditioning tensor.
+            batch_data: Batched structure tensors.
+
+        Returns:
+            Graph-conditioned atomic position residuals.
+        """
+        node_scalar = node_info[self.target_way.get("direct_pos", 0)]
+        node_context = graph_context[batch_data["batch"]]
+        return self.graph_pos_layer(torch.cat([node_scalar, node_context], dim=1))
+
+    def get_cycle_residual(self,
+                           direct_pos : torch.Tensor,
+                           direct_cell: torch.Tensor,
+                           batch_data : Dict[str, torch.Tensor],
+                           ) -> torch.Tensor:
+        """
+        Compute predicted cycle residuals from position and cell updates.
+
+        Args:
+            direct_pos: Predicted atomic displacement tensor.
+            direct_cell: Predicted cell displacement tensor.
+            batch_data: Batched structure tensors.
+
+        Returns:
+            Cycle residual tensor in fractional edge space.
+        """
+        idx_i, idx_j = batch_data["idx_i"], batch_data["idx_j"]
+        cell_pred = batch_data["cell_u"] + direct_cell
+        cell_u_repeat = batch_data["cell_u"].repeat_interleave(batch_data["n_edges"], dim=0)
+        cell_pred_repeat = cell_pred.repeat_interleave(batch_data["n_edges"], dim=0)
+        edge_unrelax = batch_data["pos_u"][idx_j] - batch_data["pos_u"][idx_i] + torch.einsum(
+            "a p, a p v -> a v", batch_data["offset"], cell_u_repeat
+        )
+        pos_relax_pred = batch_data["pos_u"] + direct_pos
+        edge_relax = pos_relax_pred[idx_j] - pos_relax_pred[idx_i] + torch.einsum(
+            "a p, a p v -> a v", batch_data["offset"], cell_pred_repeat
+        )
+        edge_delta = edge_relax - edge_unrelax
+        return torch.matmul(batch_data["cycle_basis"], edge_delta) - batch_data["cycle_offset"]
+
     def get_eq_blocks(self, activate_fn, max_r_way, max_in_way, max_out_way,
             hidden_nodes, norm_factor, conv_mode, update_edge, n_layers, adddim_way):
+        """
+        Build stacked equivariant message-passing blocks.
+
+        Args:
+            activate_fn: Activation function name.
+            max_r_way: Maximum radial tensor order for each layer.
+            max_in_way: Maximum input tensor order for each layer.
+            max_out_way: Maximum output tensor order for each layer.
+            hidden_nodes: Hidden channel sizes.
+            norm_factor: Neighbor normalization factor.
+            conv_mode: Graph convolution mode.
+            update_edge: Whether to update edge features.
+            n_layers: Number of message-passing layers.
+            adddim_way: Extra input dimensions by tensor order.
+
+        Returns:
+            ModuleList of Miao blocks.
+        """
         return nn.ModuleList([
             MiaoBlock(activate_fn=activate_fn,
                       radial_fn=self.radial_fn.replicate(),

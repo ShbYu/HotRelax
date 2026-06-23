@@ -88,7 +88,10 @@ def main(*args, model_file='./outDir/best.pt', indices=None, input_file="input.y
                            datapath=datapath,
                            properties=properties,
                            spin=spin,
-                           indices=indices)
+                           indices=indices,
+                           add_feat=eval_dict["Data"].get("addFeat", False),
+                           feat_json=eval_dict["Data"].get("featJson"),
+                           use_cycle=eval_dict["Data"].get("useCycle", False))
 
     data_loader = DataLoader(dataset,
                              batch_size=batchsize,

@@ -8,7 +8,7 @@ class Loss:
 
     atom_prop = ["forces", "spin_torques"]
     structure_prop = ["energy", "virial", "dipole", "polarizability"]
-    list_prop = ["direct_pos", "direct_cell"]
+    list_prop = ["direct_pos", "direct_cell", "cycle_residual"]
 
     def __init__(self,
                  weight  : Dict[str, float]={"energy": 1.0, "forces": 1.0},
@@ -59,6 +59,17 @@ class Loss:
                        prop       : str,
                        log_mae    : bool=False,
                        ) -> torch.Tensor:
+        """
+        Compute loss for iterative prediction lists.
+
+        Args:
+            batch_data: Batch dictionary containing prediction and target lists.
+            prop: Property name.
+            log_mae: Whether to return the last-step loss for logging.
+
+        Returns:
+            Summed list loss and optional last-step metric.
+        """
         sum_loss = []
         for prop_single in batch_data[f'{prop}_p']:
             sum_loss.append(self.loss_fn(prop_single, batch_data[f'{prop}_t']))

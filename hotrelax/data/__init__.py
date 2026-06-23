@@ -14,6 +14,9 @@ def get_dataset(
     properties: Optional[List[str]] = None,
     spin: bool = False,
     indices: List[int] = None,
+    add_feat: bool = False,
+    feat_json: Optional[Union[str, List[str]]] = None,
+    use_cycle: bool = False,
 ):
 
     kwargs = {
@@ -24,6 +27,9 @@ def get_dataset(
         "properties": properties,
         "spin": spin,
         "indices": indices,
+        "add_feat": add_feat,
+        "feat_json": feat_json,
+        "use_cycle": use_cycle,
     }
 
     return dataset_mapping[datatype](**kwargs)
