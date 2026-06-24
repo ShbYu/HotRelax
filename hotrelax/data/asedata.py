@@ -16,7 +16,7 @@ class ASEData(AtomsDataset):
         cutoff: float = 6.0,
         max_neigh: int = 20,
         add_feat: bool = False,
-        feat_json: Optional[Union[str, List[str]]] = None,
+        feat_json: str = None,
         use_cycle: bool = False,
         *args,
         **kwargs,
@@ -32,7 +32,7 @@ class ASEData(AtomsDataset):
             cutoff: Neighbor cutoff radius.
             max_neigh: Maximum number of neighbors per atom.
             add_feat: Whether to attach graph-level handcrafted features.
-            feat_json: Feature selection list or JSON file path.
+            feat_json: Feature selection in JSON file format.
             use_cycle: Whether to attach cycle tensors.
         Returns:
             None.

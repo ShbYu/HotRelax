@@ -237,7 +237,8 @@ def get_radial(p_dict, cutoff_fn):
         return radial_fn
 
 
-def get_model(p_dict, elements, mean_pos, mean_cell, std_pos, std_cell, n_neighbor):
+def get_model(p_dict, elements, mean_pos, mean_cell, std_pos, std_cell, n_neighbor,
+              graph_feat_mean=None, graph_feat_std=None):
     model_dict = p_dict['Model']
     target = p_dict['Train']['targetProp']
     target_way = {}
@@ -270,6 +271,10 @@ def get_model(p_dict, elements, mean_pos, mean_cell, std_pos, std_cell, n_neighb
                         bilinear=model_dict['bilinear'],
                         conv_mode=model_dict['convMode'],
                         update_edge=model_dict['updateEdge'],
+                        use_graph=model_dict["useGraph"],
+                        use_cycle=model_dict["useCycle"],
+                        graph_feat_mean=graph_feat_mean,
+                        graph_feat_std=graph_feat_std,
                         ).to(p_dict['device'])
 
     assert isinstance(model_dict['Repulsion'], int), "Repulsion should be int!"
@@ -301,12 +306,24 @@ def main(*args, input_file='input.yaml', load_model=None, load_checkpoint=None, 
     dataset = LitAtomsDataset(p_dict)
     dataset.setup()
     mean_pos, mean_cell, std_pos, std_cell, n_neighbor, elements = get_stats(p_dict["Data"])
-
+    graph_feat_mean = dataset.graph_feat_mean
+    graph_feat_std = dataset.graph_feat_std
+    
     if load_model is not None and 'ckpt' not in load_model:
         logging.info(f"Load model from {load_model}")
         model = torch.load(load_model, weights_only=False)
     else:
-        model = get_model(p_dict, elements, mean_pos, mean_cell, std_pos, std_cell, n_neighbor)
+        model = get_model(
+            p_dict,
+            elements,
+            mean_pos,
+            mean_cell,
+            std_pos,
+            std_cell,
+            n_neighbor,
+            graph_feat_mean=graph_feat_mean,
+            graph_feat_std=graph_feat_std,
+        )
         model.register_buffer('all_elements', torch.tensor(elements, dtype=torch.long))
         model.register_buffer('cutoff', torch.tensor(p_dict["cutoff"], dtype=torch.float64))
 

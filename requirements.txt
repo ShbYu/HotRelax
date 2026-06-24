@@ -1,10 +1,14 @@
---extra-index-url https://download.pytorch.org/whl/cu118
-numpy==2.1.2
+# --extra-index-url https://download.pytorch.org/whl/cu118  # for RTX 40 series
+--extra-index-url https://download.pytorch.org/whl/cu128    # for RTX 50 series
+numpy==2.1.0
 ase==3.26.0
 PyYAML==6.0.2
-torch==2.6.0+cu118
-torchaudio==2.6.0+cu118
-torchvision==0.21.0+cu118
+# torch==2.6.0+cu118            # for RTX 40 series
+# torchaudio==2.6.0+cu118
+# torchvision==0.21.0+cu118
+torch==2.9.1+cu128            # for RTX 50 series
+torchaudio==2.9.1+cu128
+torchvision==0.24.1+cu128
 lightning==2.5.5
 tensorboard==2.20.0
 pandas==2.0.1

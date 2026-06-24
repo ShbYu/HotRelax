@@ -183,9 +183,9 @@ def res_add(t1: Dict[int, torch.Tensor],
 
 
 @torch.jit.script
-def _scatter_add(x        : torch.Tensor, 
-                 idx_i    : torch.Tensor, 
-                 dim_size : Optional[int]=None, 
+def _scatter_add(x        : torch.Tensor,
+                 idx_i    : torch.Tensor,
+                 dim_size : Optional[int]=None,
                  dim      : int = 0
                  ) -> torch.Tensor:
     shape = list(x.shape)
@@ -195,6 +195,27 @@ def _scatter_add(x        : torch.Tensor,
     tmp = torch.zeros(shape, dtype=x.dtype, device=x.device)
     y = tmp.index_add(dim, idx_i, x)
     return y
+
+
+@torch.jit.script
+def _scatter_mean(x        : torch.Tensor,
+                  idx_i    : torch.Tensor,
+                  dim_size : Optional[int]=None,
+                  dim      : int = 0
+                  ) -> torch.Tensor:
+    shape = list(x.shape)
+    if dim_size is None:
+        dim_size = idx_i.max() + 1
+    shape[dim] = dim_size
+    tmp = torch.zeros(shape, dtype=x.dtype, device=x.device)
+    y = tmp.index_add(dim, idx_i, x)
+    count = torch.zeros(dim_size, dtype=x.dtype, device=x.device)
+    one = torch.ones(idx_i.shape[0], dtype=x.dtype, device=x.device)
+    count = count.index_add(0, idx_i, one)
+    view_shape = [1] * len(shape)
+    view_shape[dim] = dim_size
+    count = count.view(view_shape).clamp_min(1.0)
+    return y / count
 
 
 def progress_bar(i: int, n: int, interval: int=100):

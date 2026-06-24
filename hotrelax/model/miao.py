@@ -10,7 +10,7 @@ import torch
 from torch import nn
 from ..layer import EmbeddingLayer, RadialLayer, ReadoutLayer
 from ..layer.equivalent import NonLinearLayer, GraphConvLayer, SelfInteractionLayer
-from ..utils import find_distances, _scatter_add, res_add, TensorAggregateOP
+from ..utils import find_distances, _scatter_add, _scatter_mean, res_add, TensorAggregateOP
 
 
 class UpdateNodeBlock(nn.Module):
@@ -171,15 +171,23 @@ class MiaoNet(nn.Module):
                  bilinear        : bool=False,
                  conv_mode       : Literal['node_j', 'node_edge']='node_j',
                  update_edge     : bool=False,
+                 use_graph       : bool=False,
+                 use_cycle       : bool=False,
+                 graph_feat_mean : float=0.,
+                 graph_feat_std  : float=1.,
                  ):
         super().__init__()
         self.register_buffer("mean_pos", torch.tensor(mean_pos).float())
         self.register_buffer("mean_cell", torch.tensor(mean_cell).float())
         self.register_buffer("std_pos", torch.tensor(std_pos).float())
         self.register_buffer("std_cell", torch.tensor(std_cell).float())
+        self.register_buffer("graph_feat_mean", torch.tensor(graph_feat_mean).float())
+        self.register_buffer("graph_feat_std", torch.tensor(graph_feat_std).float())
         self.embedding_layer = embedding_layer
         self.radial_fn = radial_fn
         self.target_way = target_way
+        self.use_graph = use_graph
+        self.use_cycle = use_cycle
 
         max_in_way = [0] + max_out_way[:-1]
         hidden_nodes = [embedding_layer.n_channel] + output_dim
@@ -226,6 +234,7 @@ class MiaoNet(nn.Module):
 
     def forward(self,
                 batch_data   : Dict[str, torch.Tensor],
+                properties   : List[str] | None = None,
                 ) -> Dict[str, torch.Tensor]:
         """
         Run the Miao network forward pass.
@@ -254,7 +263,7 @@ class MiaoNet(nn.Module):
         direct_pos = output_tensors["direct_pos"] * self.std_pos + self.mean_pos
         direct_cell = _scatter_add(output_tensors['direct_cell'], batch_data['batch']) * self.std_cell + self.mean_cell
 
-        if "graph_feat" in batch_data:
+        if self.use_graph:
             graph_context = self.get_graph_context(node_info, batch_data)
             direct_pos = direct_pos + self.get_graph_pos_shift(node_info, graph_context, batch_data)
             direct_cell = direct_cell + self.graph_cell_layer(graph_context).view(-1, 3, 3)
@@ -262,7 +271,7 @@ class MiaoNet(nn.Module):
         batch_data["direct_pos_p"].append(direct_pos)
         batch_data["direct_cell_p"].append(direct_cell)
 
-        if "cycle_basis" in batch_data and "cycle_offset" in batch_data:
+        if self.use_cycle:
             batch_data["cycle_residual_p"] = [
                 self.get_cycle_residual(direct_pos, direct_cell, batch_data)
             ]
@@ -303,11 +312,10 @@ class MiaoNet(nn.Module):
         Returns:
             Graph-level conditioning tensor.
         """
-        node_scalar = node_info[self.target_way.get("direct_cell", 0)]
-        graph_embed = _scatter_add(node_scalar, batch_data["batch"])
-        n_atoms = batch_data["n_atoms"].to(graph_embed.dtype).unsqueeze(-1)
-        graph_embed = graph_embed / n_atoms
-        graph_feat = self.graph_feat_encoder(batch_data["graph_feat"])
+        node_scalar = node_info[0]
+        graph_embed = _scatter_mean(node_scalar, batch_data["batch"])
+        graph_feat_input = (batch_data["graph_feat"] - self.graph_feat_mean) / torch.clamp(self.graph_feat_std, min=1e-8)
+        graph_feat = self.graph_feat_encoder(graph_feat_input)
         return self.graph_context_layer(torch.cat([graph_embed, graph_feat], dim=1))
 
     def get_graph_pos_shift(self,
@@ -326,7 +334,7 @@ class MiaoNet(nn.Module):
         Returns:
             Graph-conditioned atomic position residuals.
         """
-        node_scalar = node_info[self.target_way.get("direct_pos", 0)]
+        node_scalar = node_info[0]
         node_context = graph_context[batch_data["batch"]]
         return self.graph_pos_layer(torch.cat([node_scalar, node_context], dim=1))
 
@@ -344,21 +352,44 @@ class MiaoNet(nn.Module):
             batch_data: Batched structure tensors.
 
         Returns:
-            Cycle residual tensor in fractional edge space.
+            Padded cycle residual tensor with shape [batch, max_cycle, 3].
         """
         idx_i, idx_j = batch_data["idx_i"], batch_data["idx_j"]
         cell_pred = batch_data["cell_u"] + direct_cell
+        cell_uinv = torch.linalg.inv(batch_data["cell_u"])
+        cell_uinv_atom = cell_uinv[batch_data["batch"]]
+        cell_pred_atom = cell_pred[batch_data["batch"]]
         cell_u_repeat = batch_data["cell_u"].repeat_interleave(batch_data["n_edges"], dim=0)
         cell_pred_repeat = cell_pred.repeat_interleave(batch_data["n_edges"], dim=0)
         edge_unrelax = batch_data["pos_u"][idx_j] - batch_data["pos_u"][idx_i] + torch.einsum(
             "a p, a p v -> a v", batch_data["offset"], cell_u_repeat
         )
-        pos_relax_pred = batch_data["pos_u"] + direct_pos
+        pos_pred_cart = batch_data["pos_u"] + direct_pos
+        pos_relax_pred = torch.matmul(
+            torch.matmul(pos_pred_cart.unsqueeze(1), cell_uinv_atom),
+            cell_pred_atom,
+        ).squeeze(1)
         edge_relax = pos_relax_pred[idx_j] - pos_relax_pred[idx_i] + torch.einsum(
             "a p, a p v -> a v", batch_data["offset"], cell_pred_repeat
         )
         edge_delta = edge_relax - edge_unrelax
-        return torch.matmul(batch_data["cycle_basis"], edge_delta) - batch_data["cycle_offset"]
+
+        batch_size = int(batch_data["n_atoms"].shape[0])
+        max_edge = int(batch_data["edge_mask"].shape[1])
+        edge_delta_padded = edge_delta.new_zeros((batch_size, max_edge, edge_delta.shape[-1]))
+
+        n_edges = batch_data["n_edges"].to(torch.long)
+        batch_ids = torch.repeat_interleave(
+            torch.arange(batch_size, device=edge_delta.device),
+            n_edges,
+        )
+        edge_offsets = torch.cumsum(n_edges, dim=0) - n_edges
+        global_edge_ids = torch.arange(edge_delta.shape[0], device=edge_delta.device)
+        edge_ids = global_edge_ids - torch.repeat_interleave(edge_offsets, n_edges)
+        edge_delta_padded[batch_ids, edge_ids] = edge_delta
+
+        cycle_residual = torch.matmul(batch_data["cycle_basis"], edge_delta_padded)
+        return cycle_residual - batch_data["cycle_offset"] @ direct_cell
 
     def get_eq_blocks(self, activate_fn, max_r_way, max_in_way, max_out_way,
             hidden_nodes, norm_factor, conv_mode, update_edge, n_layers, adddim_way):

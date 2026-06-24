@@ -24,6 +24,10 @@ class LitAtomsDataset(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None):
         dataset = self.data_parser.get_dataset()
         self._trainset, self._testset = self.data_parser.split_dataset(dataset)
+        if hasattr(dataset, "meta_data") and isinstance(dataset.meta_data, dict):
+            self.stats.update(dataset.meta_data)
+        elif hasattr(self._trainset, "meta_data") and isinstance(self._trainset.meta_data, dict):
+            self.stats.update(self._trainset.meta_data)
         # self.calculate_stats()
 
     @property
@@ -127,3 +131,15 @@ class LitAtomsDataset(pl.LightningDataModule):
         if "ground_energy" not in self.stats:
             self.calculate_stats()
         return self.stats["ground_energy"]
+
+    @property
+    def graph_feat_mean(self):
+        if "graph_feat_mean" in self.stats:
+            return self.stats["graph_feat_mean"]
+        return None
+
+    @property
+    def graph_feat_std(self):
+        if "graph_feat_std" in self.stats:
+            return self.stats["graph_feat_std"]
+        return None

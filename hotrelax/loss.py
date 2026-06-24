@@ -71,8 +71,15 @@ class Loss:
             Summed list loss and optional last-step metric.
         """
         sum_loss = []
-        for prop_single in batch_data[f'{prop}_p']:
-            sum_loss.append(self.loss_fn(prop_single, batch_data[f'{prop}_t']))
+        if prop == "cycle_residual" and "cycle_mask" in batch_data:
+            mask = batch_data["cycle_mask"].unsqueeze(-1).to(batch_data[f'{prop}_t'].dtype)
+            for prop_single in batch_data[f'{prop}_p']:
+                diff = (prop_single - batch_data[f'{prop}_t']) * mask
+                denom = mask.sum().clamp_min(1.0)
+                sum_loss.append(torch.sum(diff ** 2) / denom)
+        else:
+            for prop_single in batch_data[f'{prop}_p']:
+                sum_loss.append(self.loss_fn(prop_single, batch_data[f'{prop}_t']))
         if log_mae:
             return sum(sum_loss), sum_loss[-1]
         return sum(sum_loss), None

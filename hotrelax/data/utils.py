@@ -9,11 +9,12 @@ import numpy as np
 import torch
 from ase import Atoms
 from ase.neighborlist import neighbor_list
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, Sampler
 
 from ..utils import EnvPara
 from .crystgraph import HotRelax
-from .graph_feat import feat_dict
+from .graph_feat import compute_feature
 
 
 log = logging.getLogger(__name__)
@@ -39,69 +40,23 @@ def register_dataset(name: str):
 
     return decorator
 
-
-def _load_graph_feature_keys(
-    feat_json: Optional[Union[str, List[str]]],
-) -> Optional[List[str]]:
-    """
-    Load selected graph feature keys.
-
-    Args:
-        feat_json: Feature key list or a JSON file path storing the key list.
-
-    Returns:
-        Selected graph feature names, or None when all features should be used.
-    """
-    if feat_json is None:
-        return None
-    if isinstance(feat_json, list):
-        return feat_json
-    with open(feat_json) as file_obj:
-        return json.load(file_obj)
-
-
-
-def _flatten_graph_feature(value: np.ndarray) -> np.ndarray:
-    """
-    Flatten one graph feature into a 1D numpy array.
-
-    Args:
-        value: Scalar or array-like graph feature value.
-
-    Returns:
-        A flattened float array.
-    """
-    return np.asarray(value, dtype=np.float64).reshape(-1)
-
-
-
-def _select_graph_features(
-    all_feat: dict,
-    select_key: Optional[List[str]],
-) -> np.ndarray:
+def select_graph_features(graph: nx.MultiDiGraph, select_key: List[str]) -> np.ndarray:
     """
     Build the final graph feature vector.
 
     Args:
-        all_feat: Dictionary returned by feat_dict.
-        select_key: Selected feature names. If None, use all features.
+        select_key: Selected feature names.
 
     Returns:
         A flattened graph-level feature vector.
     """
-    if select_key is None:
-        select_key = list(all_feat.keys())
-
     select_feat = []
+    simple_graph = nx.Graph(graph)
     for key in select_key:
-        select_feat.append(_flatten_graph_feature(all_feat[key]))
-    if len(select_feat) == 0:
-        return np.empty(0, dtype=np.float64)
+        select_feat.append(np.asarray(compute_feature(key, graph, simple_graph)).reshape(-1))
     return np.concatenate(select_feat, axis=0)
 
-
-
-def _build_graph(
+def build_graph(
     n_atoms: int,
     idx_i: np.ndarray,
     idx_j: np.ndarray,
@@ -123,37 +78,109 @@ def _build_graph(
     for i in range(n_atoms):
         graph.add_node(i)
     for i, j, offset in zip(idx_i, idx_j, offsets):
-        graph.add_edge(int(i), int(j), vector=np.asarray(offset), direction=(int(i), int(j)))
+        graph.add_edge(i, j, vector=np.asarray(offset), direction=(i, j))
     return graph
 
-
-
-def _collate_cycle_basis(batch: List[dict]) -> torch.Tensor:
+def sparse_cycle_basis(cycle_basis: np.ndarray) -> dict:
     """
-    Build a block-diagonal cycle basis for a mini-batch.
+    Convert a dense cycle basis matrix into sparse coordinate tensors.
+
+    Args:
+        cycle_basis: Dense cycle basis array with shape [n_cycle, n_edge].
+
+    Returns:
+        Dictionary containing sparse row, column, value, and shape tensors.
+    """
+    cycle_basis = np.asarray(cycle_basis)
+    row, col = np.nonzero(cycle_basis)
+    value = cycle_basis[row, col].astype(np.int8)
+    return {
+        "cycle_basis_row": torch.tensor(row, dtype=torch.long),
+        "cycle_basis_col": torch.tensor(col, dtype=torch.long),
+        "cycle_basis_value": torch.tensor(value, dtype=torch.int8),
+        "cycle_basis_shape": torch.tensor([[cycle_basis.shape[0], cycle_basis.shape[1]]], dtype=torch.long),
+    }
+
+
+def collate_cycle_tensors(batch: List[dict]) -> dict:
+    """
+    Pad cycle tensors in a mini-batch and build masks.
 
     Args:
         batch: List of single-structure data dictionaries.
 
     Returns:
-        A dense block-diagonal cycle basis tensor with shape [sum_cycle, sum_edge].
+        Dictionary containing padded cycle tensors and valid-position masks.
     """
-    total_cycle = int(sum(item["cycle_basis"].shape[0] for item in batch))
-    total_edge = int(sum(int(item["n_edges"].item()) for item in batch))
-    dtype = batch[0]["cycle_basis"].dtype
-    device = batch[0]["cycle_basis"].device
-    cycle_basis = torch.zeros((total_cycle, total_edge), dtype=dtype, device=device)
+    batch_size = len(batch)
+    offset_dtype = batch[0]["cycle_offset"].dtype
+    offset_device = batch[0]["cycle_offset"].device
 
-    cycle_start = 0
-    edge_start = 0
-    for item in batch:
-        current_basis = item["cycle_basis"]
-        n_cycle, n_edge = current_basis.shape
-        if n_cycle > 0 and n_edge > 0:
-            cycle_basis[cycle_start: cycle_start + n_cycle, edge_start: edge_start + n_edge] = current_basis
-        cycle_start += n_cycle
-        edge_start += n_edge
-    return cycle_basis
+    offset_list = [item["cycle_offset"] for item in batch]
+    cycle_offset = pad_sequence(offset_list, batch_first=True)
+
+    n_cycles = torch.tensor(
+        [offset.shape[0] for offset in offset_list],
+        dtype=torch.long,
+        device=offset_device,
+    )
+    n_edges = torch.tensor(
+        [int(item["n_edges"].item()) for item in batch],
+        dtype=torch.long,
+        device=offset_device,
+    )
+
+    max_cycle = int(n_cycles.max().item())
+    max_edge = int(n_edges.max().item())
+
+    cycle_mask = (torch.arange(max_cycle, device=offset_device)[None, :] < n_cycles[:, None])
+    edge_mask = (torch.arange(max_edge, device=offset_device)[None, :] < n_edges[:, None])
+
+    cycle_basis = torch.zeros(
+        (batch_size, max_cycle, max_edge),
+        dtype=offset_dtype,
+        device=offset_device,
+    )
+
+    if "cycle_basis_row" in batch[0]:
+        nnz = torch.tensor(
+            [item["cycle_basis_value"].numel() for item in batch],
+            dtype=torch.long,
+            device=offset_device,
+        )
+        total_nnz = int(nnz.sum().item())
+
+        if total_nnz > 0:
+            batch_ids = torch.repeat_interleave(
+                torch.arange(batch_size, device=offset_device),
+                nnz,
+            )
+            rows = torch.cat(
+                [item["cycle_basis_row"].to(offset_device, dtype=torch.long) for item in batch],
+                dim=0,
+            )
+            cols = torch.cat(
+                [item["cycle_basis_col"].to(offset_device, dtype=torch.long) for item in batch],
+                dim=0,
+            )
+            values = torch.cat(
+                [item["cycle_basis_value"].to(offset_device, dtype=offset_dtype) for item in batch],
+                dim=0,
+            )
+            cycle_basis[batch_ids, rows, cols] = values
+    else:
+        for batch_idx, item in enumerate(batch):
+            current_basis = item["cycle_basis"].to(offset_dtype)
+            n_cycle = int(item["cycle_offset"].shape[0])
+            n_edge = int(item["n_edges"].item())
+            cycle_basis[batch_idx, :n_cycle, :n_edge] = current_basis[:, :n_edge]
+
+    return {
+        "cycle_basis": cycle_basis,
+        "cycle_offset": cycle_offset,
+        "cycle_mask": cycle_mask,
+        "edge_mask": edge_mask,
+    }
 
 
 # TODO: offset and scaling for different condition
@@ -186,10 +213,7 @@ class AtomsDataset(Dataset, abc.ABC):
         Returns:
             A dictionary containing tensors required by the model and loss.
         """
-        del properties, spin
-        idx_i, idx_j, distance, offsets = neighbor_list(
-            "ijdS", atoms, cutoff, self_interaction=False
-        )
+        idx_i, idx_j, distance, offsets = neighbor_list("ijdS", atoms, cutoff, self_interaction=False)
         offsets = np.asarray(offsets)
 
         if max_neigh is not None:
@@ -207,12 +231,8 @@ class AtomsDataset(Dataset, abc.ABC):
         cell_u = torch.tensor(
             np.array(atoms.get_cell()), dtype=EnvPara.FLOAT_PRECISION
         ).view(1, 3, 3)
-        direct_pos_t = torch.tensor(
-            atoms.info["direct_pos"], dtype=EnvPara.FLOAT_PRECISION
-        )
-        direct_cell_t = torch.tensor(
-            atoms.info["direct_cell"], dtype=EnvPara.FLOAT_PRECISION
-        )
+        direct_pos_t = torch.tensor(atoms.info["direct_pos"], dtype=EnvPara.FLOAT_PRECISION)
+        direct_cell_t = torch.tensor(atoms.info["direct_cell"], dtype=EnvPara.FLOAT_PRECISION)
 
         data = {
             "atomic_number": torch.tensor(atoms.numbers, dtype=torch.long),
@@ -228,28 +248,21 @@ class AtomsDataset(Dataset, abc.ABC):
             "direct_cell_t": direct_cell_t.view(1, 3, 3),
         }
 
-        graph = None
         if add_feat or use_cycle:
-            graph = _build_graph(len(atoms), idx_i, idx_j, offsets)
+            graph = build_graph(len(atoms), idx_i, idx_j, offsets)
 
         if add_feat:
-            all_feat = feat_dict(graph)
-            select_key = _load_graph_feature_keys(feat_json)
-            select_feat = _select_graph_features(all_feat, select_key)
-            data["graph_feat"] = torch.tensor(
-                select_feat, dtype=EnvPara.FLOAT_PRECISION
-            ).view(1, -1)
+            with open(feat_json) as file_obj:
+                select_key = json.load(file_obj)
+            select_feat = select_graph_features(graph, select_key)
+            data["graph_feat"] = torch.tensor(select_feat, dtype=EnvPara.FLOAT_PRECISION).view(1, -1)
 
         if use_cycle:
             hotR = HotRelax(atoms, atoms)
             hotR.read_graph(atoms, ori_G=graph)
             hotR.get_cycle()
-            data["cycle_basis"] = torch.tensor(
-                hotR.cycle_basis, dtype=EnvPara.FLOAT_PRECISION
-            )
-            data["cycle_offset"] = torch.tensor(
-                hotR.cycle_offset, dtype=EnvPara.FLOAT_PRECISION
-            )
+            data.update(sparse_cycle_basis(hotR.cycle_basis))
+            data["cycle_offset"] = torch.tensor(hotR.cycle_offset, dtype=EnvPara.FLOAT_PRECISION)
 
         return data
 
@@ -287,7 +300,6 @@ class AtomsDataset(Dataset, abc.ABC):
         return ds
 
 
-
 def atoms_collate_fn(batch):
     """
     Collate atomistic samples into one mini-batch.
@@ -301,7 +313,7 @@ def atoms_collate_fn(batch):
     elem = batch[0]
     coll_batch = {}
 
-    skip_keys = {"idx_i", "idx_j", "cycle_basis"}
+    skip_keys = {"idx_i", "idx_j", "cycle_basis", "cycle_offset", "cycle_basis_row", "cycle_basis_col", "cycle_basis_value", "cycle_basis_shape"}
     for key in elem:
         if key not in skip_keys:
             coll_batch[key] = torch.cat([d[key] for d in batch], dim=0)
@@ -317,8 +329,9 @@ def atoms_collate_fn(batch):
             dim=0,
         )
 
-    if "cycle_basis" in elem:
-        coll_batch["cycle_basis"] = _collate_cycle_basis(batch)
+    if "cycle_basis_row" in elem or "cycle_basis" in elem:
+        cycle_tensors = collate_cycle_tensors(batch)
+        coll_batch.update(cycle_tensors)
 
     coll_batch["batch"] = torch.repeat_interleave(
         torch.arange(len(batch)), repeats=coll_batch["n_atoms"].to(torch.long), dim=0

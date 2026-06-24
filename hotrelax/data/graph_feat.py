@@ -1,45 +1,97 @@
+from typing import Callable, Dict, List, Optional
+
 import networkx as nx
 import numpy as np
-from .crystgraph import quot_gen
 from ase.io import read
 
+from .crystgraph import quot_gen
+
+
+FEATURE_REGISTRY: Dict[str, Callable] = {}
+
+
+def register_feature(name: str):
+    """
+    Register a graph feature function with a string name.
+
+    Args:
+        name: Public feature name used for lookup.
+
+    Returns:
+        Decorator that stores the feature function in the registry.
+    """
+    def decorator(func: Callable):
+        FEATURE_REGISTRY[name] = func
+        return func
+
+    return decorator
+
+
+@register_feature("betweenness_centrality_data")
 def bet_cen(G):
-    '''
-    calculate betweenness centrality
-    '''
+    """
+    Calculate betweenness centrality summary statistics.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Max/mean/min/std of betweenness centrality.
+    """
     bet_dict = nx.betweenness_centrality(G)
     bet_list = [value for value in bet_dict.values()]
     bet_list = np.array(bet_list)
 
-    return [np.max(bet_list), np.mean(bet_list), np.min(bet_list), np.std(bet_list)]
+    return np.array([np.max(bet_list), np.mean(bet_list), np.min(bet_list), np.std(bet_list)])
 
+
+@register_feature("constraints_data")
 def calc_cons(G):
-    '''
-    calculate constraints
-    '''
+    """
+    Calculate graph constraint summary statistics.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Max/mean/min/std of node constraints.
+    """
     cons_dict = nx.constraint(G)
     cons_list = [value for value in cons_dict.values()]
     cons_list = np.array(cons_list)
 
-    return [np.max(cons_list), np.mean(cons_list), np.min(cons_list), np.std(cons_list)]
+    return np.array([np.max(cons_list), np.mean(cons_list), np.min(cons_list), np.std(cons_list)])
 
+
+@register_feature("degree_centrality_data")
 def degree_cen(G):
-    '''
-    calculate degree centrality
-    '''
+    """
+    Calculate degree centrality summary statistics.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Max/mean/min/std of degree centrality.
+    """
     degree_dict = nx.degree_centrality(G)
     degree_list = [value for value in degree_dict.values()]
     degree_list = np.array(degree_list)
 
-    return [np.max(degree_list), np.mean(degree_list), np.min(degree_list), np.std(degree_list)]
+    return np.array([np.max(degree_list), np.mean(degree_list), np.min(degree_list), np.std(degree_list)])
+
 
 def cycle_sums(G):
     """
-    Return the cycle sums count of the crystal quotient graph G.
-    G: networkx.MultiGraph
-    Return: a (Nx3) matrix
+    Return the cycle sums count of the crystal quotient graph.
+
+    Args:
+        G: Input networkx MultiGraph.
+
+    Returns:
+        Cycle-count histogram indexed by cycle offset.
     """
-    SG = nx.Graph(G) # Simple graph, maybe with loop.
+    SG = nx.Graph(G)
     cycle_simple = nx.simple_cycles(SG)
     cycle_count = np.zeros(125)
 
@@ -48,9 +100,9 @@ def cycle_sums(G):
             continue
         cycSum = np.zeros([3])
         for i in range(len(cyc)):
-            vector = SG[cyc[i-1]][cyc[i]]['vector']
-            direction = SG[cyc[i-1]][cyc[i]]['direction']
-            cycDi = (cyc[i-1], cyc[i])
+            vector = SG[cyc[i - 1]][cyc[i]]["vector"]
+            direction = SG[cyc[i - 1]][cyc[i]]["direction"]
+            cycDi = (cyc[i - 1], cyc[i])
             if cycDi == direction:
                 cycSum += vector
             elif cycDi[::-1] == direction:
@@ -60,24 +112,22 @@ def cycle_sums(G):
         cycSum += 2
         index = int(cycSum[0] * 25 + cycSum[1] * 5 + cycSum[2])
         cycle_count[index] += 1
-    
+
     for edge in SG.edges():
-        # 两个点组成的环没办法通过cycle确定vector，必须通过edge确定
-        # 一个点组成的环可能有多个，也需要通过edge确定vector
         numEdges = list(G.edges()).count(edge)
         if edge[0] == edge[1]:
             for i in range(numEdges):
-                cycSum = G[edge[0]][edge[1]][i]['vector']
+                cycSum = G[edge[0]][edge[1]][i]["vector"]
                 cycSum += 2
                 index = int(cycSum[0] * 25 + cycSum[1] * 5 + cycSum[2])
                 cycle_count[index] += 1
 
         elif numEdges > 1:
-            direction0 = G[edge[0]][edge[1]][0]['direction']
-            vector0 = G[edge[0]][edge[1]][0]['vector']
+            direction0 = G[edge[0]][edge[1]][0]["direction"]
+            vector0 = G[edge[0]][edge[1]][0]["vector"]
             for j in range(1, numEdges):
-                directionJ = G[edge[0]][edge[1]][j]['direction']
-                vectorJ = G[edge[0]][edge[1]][j]['vector']
+                directionJ = G[edge[0]][edge[1]][j]["direction"]
+                vectorJ = G[edge[0]][edge[1]][j]["vector"]
                 if direction0 == directionJ:
                     cycSum = vector0 - vectorJ
                 elif direction0[::-1] == directionJ:
@@ -89,11 +139,18 @@ def cycle_sums(G):
                 cycle_count[index] += 1
     return cycle_count
 
+
 def label_edge(G):
-    '''
-    labelled edge count.
-    '''
-    edge_count = np.zeros(34)   # 34 for XMnO, 50 for MP, 36 for c2db, 27 for 2dmd, 41 for oc20
+    """
+    Count labelled edges.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Labelled-edge histogram.
+    """
+    edge_count = np.zeros(34)
     for edge in G.edges(data=True):
         _, _, data = edge
         vector = data["vector"] + 1
@@ -101,10 +158,17 @@ def label_edge(G):
         edge_count[index] += 1
     return edge_count
 
+
 def label_edge_check(G):
-    '''
-    max labelled edge count.
-    '''
+    """
+    Get the maximum labelled-edge index.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Maximum labelled-edge index.
+    """
     max_index = 0
     for edge in G.edges(data=True):
         _, _, data = edge
@@ -114,13 +178,19 @@ def label_edge_check(G):
             max_index = index
     return max_index
 
+
+@register_feature("edge_degree_count")
 def edge_degree(G):
-    '''
-    edge degree count.
-    the number of edges adjacent to e.
-    '''
-    # TODO: why only 5?
-    edge_degree_count = np.zeros(48)    # 48 for XMnO, 87 for MP, 54 for c2db, 17 low 2dmd, 93 for oc20
+    """
+    Count edge-adjacent degree values.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Edge-degree histogram.
+    """
+    edge_degree_count = np.zeros(48)
     edges_list = list(G.edges())
     for i in range(len(edges_list)):
         degree = -1
@@ -132,11 +202,17 @@ def edge_degree(G):
         edge_degree_count[degree] += 1
     return edge_degree_count
 
+
 def edge_degree_check(G):
-    '''
-    max edge degree count.
-    the number of edges adjacent to e.
-    '''
+    """
+    Get the maximum edge-adjacent degree value.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Maximum edge degree.
+    """
     max_degree = 0
     edges_list = list(G.edges())
     for i in range(len(edges_list)):
@@ -150,22 +226,35 @@ def edge_degree_check(G):
             max_degree = degree
     return max_degree
 
+
+@register_feature("eigenvector_centrality_data")
 def egv_cen(G):
-    '''
-    calculate eigenvector centrality
-    '''
+    """
+    Calculate eigenvector centrality summary statistics.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Mean and std of eigenvector centrality.
+    """
     egv_dict = nx.eigenvector_centrality(G)
     egv_list = [value for value in egv_dict.values()]
     egv_list = np.array(egv_list)
 
-    return [np.mean(egv_list), np.std(egv_list)]
+    return np.array([np.mean(egv_list), np.std(egv_list)])
+
 
 def energy_radius(G):
-    '''
-    calculate graph energy and spectral radius
-    '''
-    # 图能量为图的邻接矩阵的特征值绝对值之和
-    # 谱半径为图的邻接矩阵的特征值绝对值的最大值
+    """
+    Calculate graph energy and spectral radius.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Graph energy and spectral radius.
+    """
     A = nx.adjacency_matrix(G)
     eigenvalues = np.linalg.eigvals(A.toarray())
     graph_energy = np.sum(np.abs(eigenvalues))
@@ -173,10 +262,18 @@ def energy_radius(G):
 
     return graph_energy, spectral_radius
 
+
+@register_feature("is_neighbor_regular")
 def nei_regular(G):
-    '''
-    neighbor degree is the same or not
-    '''
+    """
+    Check whether all neighbors of each node have the same degree.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Integer flag indicating neighbor-regularity.
+    """
     is_neighbor_regular = 1
     for node in G.nodes():
         neighbors = list(G.neighbors(node))
@@ -184,52 +281,88 @@ def nei_regular(G):
         if len(set(degrees)) != 1:
             is_neighbor_regular = 0
             break
-    return is_neighbor_regular
+    return np.array([is_neighbor_regular])
 
+
+@register_feature("is_node_regular")
 def node_regular(G):
-    '''
-    node degree is the same or not
-    '''
+    """
+    Check whether all nodes have the same degree.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Integer flag indicating node-regularity.
+    """
     is_node_regular = 1
     degrees = [G.degree[node] for node in G.nodes()]
     if len(set(degrees)) != 1:
         is_node_regular = 0
-    return is_node_regular
+    return np.array([is_node_regular])
 
+
+@register_feature("louvain_communities_data")
 def lou_com(G):
-    '''
-    calculate louvain communities.
-    '''
-    lou_com = nx.community.louvain_communities(G, weight=None)
-    lou_size = np.array([len(com) for com in lou_com])
-    return [len(lou_size), np.max(lou_size), np.mean(lou_size), np.min(lou_size), np.std(lou_size)]
+    """
+    Calculate Louvain community summary statistics.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Community-count and community-size summary statistics.
+    """
+    lou_coms = nx.community.louvain_communities(G, weight=None)
+    lou_size = np.array([len(com) for com in lou_coms])
+    return np.array([len(lou_size), np.max(lou_size), np.mean(lou_size), np.min(lou_size), np.std(lou_size)])
+
 
 def max_eccen(G):
-    '''
-    maximum eccentricity
-    '''
+    """
+    Calculate maximum eccentricity.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Maximum eccentricity.
+    """
     ecc_dict = nx.eccentricity(G)
     ecc_list = [value for value in ecc_dict.values()]
-    
+
     return max(ecc_list)
 
+
+@register_feature("neighbor_degree_count")
 def nei_degree(G):
-    '''
-    neighbor degree count
-    '''
-    # TODO: why only 5?
-    nei_degree_count = np.zeros(37) # 37 for XMnO, 64 for MP, 54 for c2db, 17 for 2dmd, 93 for oc20
+    """
+    Count neighbor degree values.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Neighbor-degree histogram.
+    """
+    nei_degree_count = np.zeros(37)
     for node in G.nodes():
         for nei in G.neighbors(node):
             degree = G.degree[nei]
             nei_degree_count[degree] += 1
     return nei_degree_count
 
+
 def nei_degree_check(G):
-    '''
-    max neighbor degree count
-    '''
-    # TODO: why only 5?
+    """
+    Get the maximum neighbor degree.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Maximum neighbor degree.
+    """
     max_degree = 0
     for node in G.nodes():
         for nei in G.neighbors(node):
@@ -238,99 +371,132 @@ def nei_degree_check(G):
                 max_degree = degree
     return max_degree
 
+
+@register_feature("square_clustering_data")
 def squ_clu(G):
-    '''
-    calculate square clustering
-    '''
+    """
+    Calculate square clustering summary statistics.
+
+    Args:
+        G: Input graph.
+
+    Returns:
+        Max/mean/min/std of square clustering.
+    """
     clu_dict = nx.square_clustering(G)
     clu_list = [value for value in clu_dict.values()]
     clu_list = np.array(clu_list)
 
-    return [np.max(clu_list), np.mean(clu_list), np.min(clu_list), np.std(clu_list)]
+    return np.array([np.max(clu_list), np.mean(clu_list), np.min(clu_list), np.std(clu_list)])
 
-def feat_dict(muti_graph, connect=True):
+
+def compute_feature(name: str, muti_graph, simple_graph, connect: bool = True) -> np.ndarray:
     """
-    connect为图是否连通的信息
+    Compute one feature by its string name.
+
+    Args:
+        name: Registered feature name.
+        muti_graph: Input multigraph.
+        simple_graph: Simple graph converted from the multigraph.
+        connect: Whether graph-connected-only features should be evaluated.
+
+    Returns:
+        One feature array.
     """
-    simple_graph = nx.Graph(muti_graph)
-    if len(simple_graph) == 1:
-        ab_con = 0
-    else:
-        ab_con = nx.algebraic_connectivity(simple_graph, weight=None, method='tracemin_lu')    # algebraic connectivity
-    if connect:
-        ave_spl = nx.average_shortest_path_length(muti_graph)   # average shortest path lenght
-        bary_size = len(nx.barycenter(muti_graph))          # barycenter size
-        max_ecc = max_eccen(muti_graph)                     # maximum eccentricity
-    else:
-        ave_spl = 0
-        bary_size = 0
-        max_ecc = 0
-    try:
-        egv_data = egv_cen(simple_graph)                    # eigenvector centrality
-    except:
-        egv_data = [0, 0]
-    bet_cen_data = bet_cen(muti_graph)
-    cons_data = calc_cons(muti_graph)
-    #cycle_sum_count = cycle_sums(muti_graph)           # cycle sum array
-    degree_cen_data = degree_cen(muti_graph)
-    edge_degree_count = edge_degree(muti_graph)         # edge degree count array
-    global_efficiency = nx.global_efficiency(muti_graph)    # global efficiency
-    graph_energy, spectral_radius \
-        = energy_radius(muti_graph)                     # graph energy and spectral radius
-    is_eulerian = int(nx.is_eulerian(muti_graph))       # is eulerian or not
-    is_neighbor_regular = nei_regular(muti_graph)       # is neighbor regular or not
-    is_node_regular = node_regular(muti_graph)          # is node regular or not
-    is_planar = int(nx.is_planar(muti_graph))           # is planar
-    #label_edge_count = label_edge(muti_graph)          # label edge array
-    len_dominating_set = len(nx.dominating_set(muti_graph)) # len dominating set
-    local_efficiency = nx.local_efficiency(muti_graph)  # local efficiency
-    lou_com_data = lou_com(muti_graph)                  # louvain communities array
-    nei_degree_count = nei_degree(muti_graph)           # neighbor degree count array
-    num_bridge = len(list(nx.bridges(muti_graph)))      # number of bridges
-    num_cycle_basis = muti_graph.size() - len(muti_graph) + 1   # number of cycle basis
-    num_edge = len(list(muti_graph.edges()))            # number of edges
-    num_node = len(list(muti_graph.nodes()))            # number of nodes
-    squ_clu_data = squ_clu(muti_graph)                  # square clustering
-    wiener_index = nx.wiener_index(muti_graph)          # wiener index
+    if name == "algebraic_connectivity":
+        if len(simple_graph) == 1:
+            return np.array([0])
+        return np.array([
+            nx.algebraic_connectivity(simple_graph, weight=None, method="tracemin_lu")
+        ])
+    if name == "average_shortest_path_length":
+        value = nx.average_shortest_path_length(muti_graph) if connect else 0
+        return np.array([value])
+    if name == "barycenter_size":
+        value = len(nx.barycenter(muti_graph)) if connect else 0
+        return np.array([value])
+    if name == "global_efficiency":
+        return np.array([nx.global_efficiency(muti_graph)])
+    if name == "graph_energy":
+        graph_energy, _ = energy_radius(muti_graph)
+        return np.array([graph_energy])
+    if name == "is_eulerian":
+        return np.array([int(nx.is_eulerian(muti_graph))])
+    if name == "is_planar":
+        return np.array([int(nx.is_planar(muti_graph))])
+    if name == "len_dominating_set":
+        return np.array([len(nx.dominating_set(muti_graph))])
+    if name == "local_efficiency":
+        return np.array([nx.local_efficiency(muti_graph)])
+    if name == "maximum_eccentricity":
+        value = max_eccen(muti_graph) if connect else 0
+        return np.array([value])
+    if name == "num_bridge":
+        return np.array([len(list(nx.bridges(muti_graph)))])
+    if name == "num_cycle_basis":
+        return np.array([muti_graph.size() - len(muti_graph) + 1])
+    if name == "num_edge":
+        return np.array([len(list(muti_graph.edges()))])
+    if name == "num_node":
+        return np.array([len(list(muti_graph.nodes()))])
+    if name == "spectral_radius":
+        _, spectral_radius = energy_radius(muti_graph)
+        return np.array([spectral_radius])
+    if name == "wiener_index":
+        return np.array([nx.wiener_index(muti_graph)])
+    if name == "eigenvector_centrality_data":
+        try:
+            return FEATURE_REGISTRY[name](simple_graph)
+        except Exception:
+            return np.array([0, 0])
+    if name in {
+        "betweenness_centrality_data",
+        "constraints_data",
+        "degree_centrality_data",
+        "edge_degree_count",
+        "is_neighbor_regular",
+        "is_node_regular",
+        "louvain_communities_data",
+        "neighbor_degree_count",
+        "square_clustering_data",
+    }:
+        return FEATURE_REGISTRY[name](muti_graph)
 
-    data = {
-        "algebraic_connectivity":       np.array([ab_con]),
-        "average_shortest_path_length": np.array([ave_spl]),
-        "barycenter_size":              np.array([bary_size]),
-        "betweenness_centrality_data":  np.array(bet_cen_data),
-        "constraints_data":             np.array(cons_data),
-        #"cycle_sum_count":              cycle_sum_count,
-        "degree_centrality_data":       np.array(degree_cen_data),
-        "edge_degree_count":            edge_degree_count,
-        "eigenvector_centrality_data":  np.array(egv_data),
-        "global_efficiency":            np.array([global_efficiency]),
-        "graph_energy":                 np.array([graph_energy]),
-        "is_eulerian":                  np.array([is_eulerian]),
-        "is_neighbor_regular":          np.array([is_neighbor_regular]),
-        "is_node_regular":              np.array([is_node_regular]),
-        "is_planar":                    np.array([is_planar]),
-        #"labelled_edge_count":          label_edge_count,
-        "len_dominating_set":           np.array([len_dominating_set]),
-        "local_efficiency":             np.array([local_efficiency]),
-        "louvain_communities_data":     np.array(lou_com_data),
-        "maximum_eccentricity":         np.array([max_ecc]),
-        "neighbor_degree_count":        nei_degree_count,
-        "num_bridge":                   np.array([num_bridge]),
-        "num_cycle_basis":              np.array([num_cycle_basis]),
-        "num_edge":                     np.array([num_edge]),
-        "num_node":                     np.array([num_node]),
-        "spectral_radius":              np.array([spectral_radius]),
-        "square_clustering_data":       np.array(squ_clu_data),
-        "wiener_index":                 np.array([wiener_index]),
-    }
+    return FEATURE_REGISTRY[name](muti_graph)
 
-    return data
 
 if __name__ == "__main__":
-    
+    default_names = [
+        "algebraic_connectivity",
+        "average_shortest_path_length",
+        "barycenter_size",
+        "betweenness_centrality_data",
+        "constraints_data",
+        "degree_centrality_data",
+        "edge_degree_count",
+        "eigenvector_centrality_data",
+        "global_efficiency",
+        "graph_energy",
+        "is_eulerian",
+        "is_neighbor_regular",
+        "is_node_regular",
+        "is_planar",
+        "len_dominating_set",
+        "local_efficiency",
+        "louvain_communities_data",
+        "maximum_eccentricity",
+        "neighbor_degree_count",
+        "num_bridge",
+        "num_cycle_basis",
+        "num_edge",
+        "num_node",
+        "spectral_radius",
+        "square_clustering_data",
+        "wiener_index",
+    ]
+
     atoms = read("test.cif", index=0, format="cif")
-    muti_graph, connect = quot_gen(atoms, "voronoi", 0.5)
-    feat_dict(muti_graph, connect)
+    muti_graph = quot_gen(atoms, "voronoi", 0.5)
     '''
     G = nx.MultiGraph()
     G.add_edge(0, 0, vector=np.array([0, 0, 1]), direct=(0, 0))

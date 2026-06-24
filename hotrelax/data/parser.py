@@ -243,9 +243,7 @@ class PtDataParser(DatasetParser):
         return None
 
     def get_dataset(self):
-        return PtData(
-            ptdata=self.get_datapath(),
-        )
+        return PtData(ptdata=self.get_datapath())
 
     def split_by_set(self, dataset):
         already_in = len(dataset)

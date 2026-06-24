@@ -66,7 +66,7 @@ class LitAtomicModule(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         torch.set_grad_enabled(self.required_derivatives)
-        self.model(batch, self.p_dict["Train"]['targetProp'], create_graph=False)
+        self.model(batch, self.p_dict["Train"]['targetProp'])
         loss, loss_dict, mae_dict = self.loss_calculator.get_loss(batch, verbose=True, log_mae=True)
         self.log("val_loss", loss, batch_size=batch['n_atoms'].shape[0])
         for prop in loss_dict:
@@ -75,7 +75,7 @@ class LitAtomicModule(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         torch.set_grad_enabled(self.required_derivatives)
-        self.model(batch, self.p_dict["Train"]['targetProp'], create_graph=False)
+        self.model(batch, self.p_dict["Train"]['targetProp'])
         loss, loss_dict = self.loss_calculator.get_loss(batch, verbose=True)
         loss_dict['test_loss'] = loss
         self.log_dict(loss_dict)
