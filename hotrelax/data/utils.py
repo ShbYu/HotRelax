@@ -15,6 +15,7 @@ from torch.utils.data import Dataset, Sampler
 from ..utils import EnvPara
 from .crystgraph import HotRelax
 from .graph_feat import compute_feature
+from .atom_feat import compute_atom_features
 
 
 log = logging.getLogger(__name__)
@@ -193,8 +194,9 @@ class AtomsDataset(Dataset, abc.ABC):
         properties: Optional[List[str]] = None,
         spin: bool = False,
         max_neigh: Optional[int] = None,
-        add_feat: bool = False,
+        add_graph_feat: bool = False,
         feat_json: Optional[Union[str, List[str]]] = None,
+        add_atom_feat: bool = False,
         use_cycle: bool = False,
     ):
         """
@@ -214,7 +216,7 @@ class AtomsDataset(Dataset, abc.ABC):
             A dictionary containing tensors required by the model and loss.
         """
         idx_i, idx_j, distance, offsets = neighbor_list("ijdS", atoms, cutoff, self_interaction=False)
-        offsets = np.asarray(offsets)
+        offsets = np.array(offsets)
 
         if max_neigh is not None:
             filter_index = []
@@ -248,14 +250,18 @@ class AtomsDataset(Dataset, abc.ABC):
             "direct_cell_t": direct_cell_t.view(1, 3, 3),
         }
 
-        if add_feat or use_cycle:
+        if add_graph_feat or use_cycle:
             graph = build_graph(len(atoms), idx_i, idx_j, offsets)
 
-        if add_feat:
+        if add_graph_feat:
             with open(feat_json) as file_obj:
                 select_key = json.load(file_obj)
             select_feat = select_graph_features(graph, select_key)
             data["graph_feat"] = torch.tensor(select_feat, dtype=EnvPara.FLOAT_PRECISION).view(1, -1)
+        
+        if add_atom_feat:
+            atom_feat = compute_atom_features(atoms, tol=0.5)
+            data["atom_feat"] = torch.tensor(atom_feat, dtype=EnvPara.FLOAT_PRECISION)
 
         if use_cycle:
             hotR = HotRelax(atoms, atoms)

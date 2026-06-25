@@ -143,3 +143,15 @@ class LitAtomsDataset(pl.LightningDataModule):
         if "graph_feat_std" in self.stats:
             return self.stats["graph_feat_std"]
         return None
+
+    @property
+    def atom_feat_mean(self):
+        if "atom_feat_mean" in self.stats:
+            return self.stats["atom_feat_mean"]
+        return None
+
+    @property
+    def atom_feat_std(self):
+        if "atom_feat_std" in self.stats:
+            return self.stats["atom_feat_std"]
+        return None

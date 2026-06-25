@@ -22,7 +22,7 @@ def eval(model, data_loader, properties, device, output="results.txt"):
         batch_data = {key: value.to(device) for key, value in batch_data.items()}
         start_time = time.time()
         with torch.no_grad():
-            model(batch_data, properties, create_graph=False)
+            model(batch_data, properties)
 
         pos_unrelax = batch_data["pos_u"]
         pred_pos = batch_data["direct_pos_p"][-1] + pos_unrelax

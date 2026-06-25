@@ -14,8 +14,9 @@ def get_dataset(
     properties: Optional[List[str]] = None,
     spin: bool = False,
     indices: List[int] = None,
-    add_feat: bool = False,
+    add_graph_feat: bool = False,
     feat_json: Optional[Union[str, List[str]]] = None,
+    add_atom_feat: bool = False,
     use_cycle: bool = False,
 ):
 
@@ -27,8 +28,9 @@ def get_dataset(
         "properties": properties,
         "spin": spin,
         "indices": indices,
-        "add_feat": add_feat,
+        "add_graph_feat": add_graph_feat,
         "feat_json": feat_json,
+        "add_atom_feat": add_atom_feat,
         "use_cycle": use_cycle,
     }
 

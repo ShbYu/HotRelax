@@ -5,12 +5,12 @@ device: 'cuda'
 Data:
   type: pt    # ase for ".traj" or pt for ".pt"
   path: .
-  trainBatch: 8
-  testBatch: 8
+  trainBatch: 2
+  testBatch: 2
   evalBatch: 1
-  trainSet: ../dataset/data_mp/train/data.pt  # your_mp_train_set_path
-  testSet: ../dataset/data_mp/val/data.pt   # your_mp_valid_set_path
-  evalSet: ../dataset/data_mp/test/data.pt   # your_mp_test_set_path
+  trainSet: ../dataset/mp_20/train/data.pt  # your_mp_train_set_path
+  testSet: ../dataset/mp_20/val/data.pt   # your_mp_valid_set_path
+  evalSet: ../dataset/mp_20/test/data.pt   # your_mp_test_set_path
   numWorkers: 8
   pinMemory: True
   mean_pos: 0.0
@@ -37,6 +37,9 @@ Model:
     nBasis: 8
     nHidden: [256, 256]
     activateFn: silu
+  useGraph: False
+  useAtomFeat: True
+  useCycle: False
 Train:
   warmupSteps: 500
   allowMissing: False

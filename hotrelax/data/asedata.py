@@ -15,8 +15,9 @@ class ASEData(AtomsDataset):
         spin: bool = False,
         cutoff: float = 6.0,
         max_neigh: int = 20,
-        add_feat: bool = False,
+        add_graph_feat: bool = False,
         feat_json: str = None,
+        add_atom_feat: bool = False,
         use_cycle: bool = False,
         *args,
         **kwargs,
@@ -31,8 +32,9 @@ class ASEData(AtomsDataset):
             spin: Whether spin information is used.
             cutoff: Neighbor cutoff radius.
             max_neigh: Maximum number of neighbors per atom.
-            add_feat: Whether to attach graph-level handcrafted features.
+            add_graph_feat: Whether to attach graph-level handcrafted features.
             feat_json: Feature selection in JSON file format.
+            add_atom_feat: Whether to attach atom-level handcrafted features.
             use_cycle: Whether to attach cycle tensors.
         Returns:
             None.
@@ -47,8 +49,9 @@ class ASEData(AtomsDataset):
         self.properties = properties
         self.spin = spin
         self.max_neigh = max_neigh
-        self.add_feat = add_feat
+        self.add_graph_feat = add_graph_feat
         self.feat_json = feat_json
+        self.add_atom_feat = add_atom_feat
         self.use_cycle = use_cycle
 
     def __len__(self):
@@ -75,8 +78,9 @@ class ASEData(AtomsDataset):
             cutoff=self.cutoff,
             spin=self.spin,
             max_neigh=self.max_neigh,
-            add_feat=self.add_feat,
+            add_graph_feat=self.add_graph_feat,
             feat_json=self.feat_json,
+            add_atom_feat=self.add_atom_feat,
             use_cycle=self.use_cycle,
         )
         return data
