@@ -15,7 +15,7 @@ import time
 
 def eval(model, data_loader, properties, device, output="results.txt"):
     with open(output, 'w') as fileobj:
-        fileobj.write('cif_id\tmae_pos_dummy\tmae_pos_pred\tmae_cell_dummy\tmae_cell_pred\tmae_volume_dummy\tmae_volume_pred\tmatch_rate\ttime\n')
+        fileobj.write('cif_id\tmae_pos_dummy\tmae_pos_pred\tmae_cell_dummy\tmae_cell_pred\tmatch_rate\ttime\n')
 
     pred_traj = Trajectory(f"pred_test.traj", 'a')
     for batch_data in data_loader:

@@ -37,23 +37,6 @@ def _collate_fn(batch):
         number[key] = [len(d[key]) for d in batch]
     return coll_batch, number
 
-def _convert_sparse_cycle_in_sample(data: dict) -> dict:
-    """
-    Replace dense cycle basis with sparse coordinate fields in one sample.
-
-    Args:
-        data: One sample dictionary.
-
-    Returns:
-        Updated sample dictionary using sparse cycle basis fields.
-    """
-    if "cycle_basis" not in data:
-        return data
-    sparse_basis = sparse_cycle_basis(data["cycle_basis"].cpu().numpy())
-    data.pop("cycle_basis")
-    data.update(sparse_basis)
-    return data
-
 
 def main(
     *args,

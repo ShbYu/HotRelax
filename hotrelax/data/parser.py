@@ -74,9 +74,7 @@ class DatasetParser:
         log.info(
             f"Random split, train num: {self.data_dict['trainNum']}, test num: {self.data_dict['testNum']}"
         )
-        assert self.data_dict['trainNum'] + self.data_dict['testNum'] <= len(
-            self.dataset
-        )
+        assert self.data_dict['trainNum'] + self.data_dict['testNum'] <= len(dataset)
         idx = np.random.choice(
             len(dataset),
             self.data_dict['trainNum'] + self.data_dict['testNum'],

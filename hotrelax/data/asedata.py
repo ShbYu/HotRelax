@@ -28,10 +28,6 @@ class ASEData(AtomsDataset):
             spin: Whether spin information is used.
             cutoff: Neighbor cutoff radius.
             max_neigh: Maximum number of neighbors per atom.
-            add_graph_feat: Whether to attach graph-level handcrafted features.
-            feat_json: Feature selection in JSON file format.
-            add_atom_feat: Whether to attach atom-level handcrafted features.
-            use_cycle: Whether to attach cycle tensors.
         Returns:
             None.
         """
@@ -84,6 +80,5 @@ class ASEData(AtomsDataset):
             None.
         """
         if isinstance(frames, str):
-            frames = read(frames, index=":")
             frames = read(frames, index=":")
         self.frames.extend(frames)

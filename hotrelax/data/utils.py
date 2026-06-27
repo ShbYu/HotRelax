@@ -59,9 +59,6 @@ class AtomsDataset(Dataset, abc.ABC):
             properties: Kept for API compatibility with existing dataset callers.
             spin: Kept for API compatibility with existing dataset callers.
             max_neigh: Maximum number of neighbors per center atom.
-            add_feat: Whether to attach graph-level handcrafted features.
-            feat_json: Feature selection list or JSON file path.
-            use_cycle: Whether to attach cycle basis and cycle offset tensors.
 
         Returns:
             A dictionary containing tensors required by the model and loss.
