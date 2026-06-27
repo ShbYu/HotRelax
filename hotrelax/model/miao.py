@@ -171,29 +171,15 @@ class MiaoNet(nn.Module):
                  bilinear        : bool=False,
                  conv_mode       : Literal['node_j', 'node_edge']='node_j',
                  update_edge     : bool=False,
-                 use_graph       : bool=False,
-                 use_cycle       : bool=False,
-                 use_atom_feat   : bool=False,
-                 graph_feat_mean : float=0.,
-                 graph_feat_std  : float=1.,
-                 atom_feat_mean  : float=0.,
-                 atom_feat_std   : float=1.,
                  ):
         super().__init__()
         self.register_buffer("mean_pos", torch.tensor(mean_pos).float())
         self.register_buffer("mean_cell", torch.tensor(mean_cell).float())
         self.register_buffer("std_pos", torch.tensor(std_pos).float())
         self.register_buffer("std_cell", torch.tensor(std_cell).float())
-        self.register_buffer("graph_feat_mean", torch.tensor(graph_feat_mean).float())
-        self.register_buffer("graph_feat_std", torch.tensor(graph_feat_std).float())
-        self.register_buffer("atom_feat_mean", torch.tensor(atom_feat_mean).float())
-        self.register_buffer("atom_feat_std", torch.tensor(atom_feat_std).float())
         self.embedding_layer = embedding_layer
         self.radial_fn = radial_fn
         self.target_way = target_way
-        self.use_graph = use_graph
-        self.use_cycle = use_cycle
-        self.use_atom_feat = use_atom_feat
 
         max_in_way = [0] + max_out_way[:-1]
         hidden_nodes = [embedding_layer.n_channel] + output_dim
@@ -216,36 +202,6 @@ class MiaoNet(nn.Module):
                                         bilinear=bilinear,
                                         e_dim=embedding_layer.n_channel,
                                         )
-        if use_atom_feat:
-            self.atom_feat_encoder = nn.Sequential(
-                nn.LazyLinear(embedding_layer.n_channel),
-                nn.SiLU(),
-                nn.Linear(embedding_layer.n_channel, embedding_layer.n_channel),
-            )
-            self.atom_feat_fuse = nn.Sequential(
-                nn.Linear(embedding_layer.n_channel * 2, embedding_layer.n_channel),
-                nn.SiLU(),
-                nn.Linear(embedding_layer.n_channel, embedding_layer.n_channel),
-            )
-        if use_graph:
-            self.graph_feat_encoder = nn.Sequential(
-                nn.LazyLinear(hidden_nodes[-1]),
-                nn.SiLU(),
-                nn.Linear(hidden_nodes[-1], hidden_nodes[-1]),
-                nn.SiLU(),
-            )
-            self.graph_context_layer = nn.Sequential(
-                nn.Linear(hidden_nodes[-1] * 2, hidden_nodes[-1]),
-                nn.SiLU(),
-            )
-            self.graph_cond_layer = nn.Sequential(
-                nn.Linear(hidden_nodes[-1], hidden_nodes[-1]),
-                nn.SiLU(),
-                nn.Linear(hidden_nodes[-1], hidden_nodes[-1]),
-            )
-            nn.init.zeros_(self.graph_cond_layer[-1].weight)
-            nn.init.zeros_(self.graph_cond_layer[-1].bias)
-            self.graph_alpha = nn.Parameter(torch.tensor(0.0))
         # TensorAggregateOP.set_max(max(max_in_way), max(max_out_way), max(max_r_way))
 
     def forward(self,
@@ -274,11 +230,6 @@ class MiaoNet(nn.Module):
         node_info, edge_info = self.get_init_info(batch_data)
         for en_equivalent in self.en_equivalent_blocks:
             node_info, edge_info = en_equivalent(node_info, edge_info, batch_data)
-
-        if self.use_graph:
-            graph_context = self.get_graph_context(node_info, batch_data)
-            node_info = self.apply_graph_condition(node_info, graph_context, batch_data)
-
         output_tensors = self.readout_layer(node_info, batch_data)
 
         direct_pos = output_tensors["direct_pos"] * self.std_pos + self.mean_pos
@@ -286,12 +237,6 @@ class MiaoNet(nn.Module):
 
         batch_data["direct_pos_p"].append(direct_pos)
         batch_data["direct_cell_p"].append(direct_cell)
-
-        # if self.use_cycle:
-        #     batch_data["cycle_residual_p"] = [
-        #         self.get_cycle_residual(direct_pos, direct_cell, batch_data)
-        #     ]
-        #     batch_data["cycle_residual_t"] = torch.zeros_like(batch_data["cycle_residual_p"][-1])
 
         return batch_data
 
@@ -308,114 +253,11 @@ class MiaoNet(nn.Module):
             Initial node tensor dict and edge tensor dict.
         """
         emb = self.embedding_layer(batch_data=batch_data)
-        if self.use_atom_feat:
-            atom_feat = (batch_data["atom_feat"] - self.atom_feat_mean) / torch.clamp(self.atom_feat_std, min=1e-8)
-            atom_feat_emb = self.atom_feat_encoder(atom_feat)
-            emb = self.atom_feat_fuse(torch.cat([emb, atom_feat_emb], dim=1))
         node_info = {0: emb}
         _, dij, _ = find_distances(batch_data)
         rbf = self.radial_fn(dij)
         edge_info = {0: rbf}
         return node_info, edge_info
-
-    def get_graph_context(self,
-                          node_info : Dict[int, torch.Tensor],
-                          batch_data: Dict[str, torch.Tensor],
-                          ) -> torch.Tensor:
-        """
-        Build graph-level conditioning vectors from learned node states and handcrafted features.
-
-        Args:
-            node_info: Final node tensor dictionary.
-            batch_data: Batched structure tensors.
-
-        Returns:
-            Graph-level conditioning tensor.
-        """
-        node_scalar = node_info[0]
-        graph_embed = _scatter_mean(node_scalar, batch_data["batch"])
-        graph_feat_input = (batch_data["graph_feat"] - self.graph_feat_mean) / torch.clamp(self.graph_feat_std, min=1e-8)
-        graph_feat = self.graph_feat_encoder(graph_feat_input)
-        return self.graph_context_layer(torch.cat([graph_embed, graph_feat], dim=1))
-
-    def apply_graph_condition(self,
-                              node_info : Dict[int, torch.Tensor],
-                              graph_context: torch.Tensor,
-                              batch_data: Dict[str, torch.Tensor],
-                              ) -> Dict[int, torch.Tensor]:
-        """
-        Apply graph-conditioned scalar gates to way-1 node states before readout.
-
-        Args:
-            node_info: Final node tensor dictionary.
-            graph_context: Graph-level conditioning tensor.
-            batch_data: Batched structure tensors.
-
-        Returns:
-            Updated node tensor dictionary with conditioned way-1 states.
-        """
-        node_context = graph_context[batch_data["batch"]]
-        gamma = 0.1 * torch.tanh(self.graph_cond_layer(node_context))
-        alpha = torch.tanh(self.graph_alpha)
-        cond_node_info = dict(node_info)
-        way_one = cond_node_info[1]
-        expand_shape = [way_one.shape[0], way_one.shape[1]] + [1] * (way_one.dim() - 2)
-        way_one_gate = (1.0 + alpha * gamma).view(*expand_shape)
-        cond_node_info[1] = way_one * way_one_gate
-        return cond_node_info
-
-    def get_cycle_residual(self,
-                           direct_pos : torch.Tensor,
-                           direct_cell: torch.Tensor,
-                           batch_data : Dict[str, torch.Tensor],
-                           ) -> torch.Tensor:
-        """
-        Compute predicted cycle residuals from position and cell updates.
-
-        Args:
-            direct_pos: Predicted atomic displacement tensor.
-            direct_cell: Predicted cell displacement tensor.
-            batch_data: Batched structure tensors.
-
-        Returns:
-            Padded cycle residual tensor with shape [batch, max_cycle, 3].
-        """
-        idx_i, idx_j = batch_data["idx_i"], batch_data["idx_j"]
-        cell_pred = batch_data["cell_u"] + direct_cell
-        cell_uinv = torch.linalg.inv(batch_data["cell_u"])
-        cell_uinv_atom = cell_uinv[batch_data["batch"]]
-        cell_pred_atom = cell_pred[batch_data["batch"]]
-        cell_u_repeat = batch_data["cell_u"].repeat_interleave(batch_data["n_edges"], dim=0)
-        cell_pred_repeat = cell_pred.repeat_interleave(batch_data["n_edges"], dim=0)
-        edge_unrelax = batch_data["pos_u"][idx_j] - batch_data["pos_u"][idx_i] + torch.einsum(
-            "a p, a p v -> a v", batch_data["offset"], cell_u_repeat
-        )
-        pos_pred_cart = batch_data["pos_u"] + direct_pos
-        pos_relax_pred = torch.matmul(
-            torch.matmul(pos_pred_cart.unsqueeze(1), cell_uinv_atom),
-            cell_pred_atom,
-        ).squeeze(1)
-        edge_relax = pos_relax_pred[idx_j] - pos_relax_pred[idx_i] + torch.einsum(
-            "a p, a p v -> a v", batch_data["offset"], cell_pred_repeat
-        )
-        edge_delta = edge_relax - edge_unrelax
-
-        batch_size = int(batch_data["n_atoms"].shape[0])
-        max_edge = int(batch_data["edge_mask"].shape[1])
-        edge_delta_padded = edge_delta.new_zeros((batch_size, max_edge, edge_delta.shape[-1]))
-
-        n_edges = batch_data["n_edges"].to(torch.long)
-        batch_ids = torch.repeat_interleave(
-            torch.arange(batch_size, device=edge_delta.device),
-            n_edges,
-        )
-        edge_offsets = torch.cumsum(n_edges, dim=0) - n_edges
-        global_edge_ids = torch.arange(edge_delta.shape[0], device=edge_delta.device)
-        edge_ids = global_edge_ids - torch.repeat_interleave(edge_offsets, n_edges)
-        edge_delta_padded[batch_ids, edge_ids] = edge_delta
-
-        cycle_residual = torch.matmul(batch_data["cycle_basis"], edge_delta_padded)
-        return cycle_residual - batch_data["cycle_offset"] @ direct_cell
 
     def get_eq_blocks(self, activate_fn, max_r_way, max_in_way, max_out_way,
             hidden_nodes, norm_factor, conv_mode, update_edge, n_layers, adddim_way):

@@ -1,5 +1,5 @@
 cutoff: 6
-max_neigh: 20
+max_neigh: 50
 seed: 666
 device: 'cuda'
 Data:

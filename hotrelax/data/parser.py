@@ -47,10 +47,6 @@ class DatasetParser:
             properties=self.p_dict['Train']['targetProp'],
             spin=self.p_dict['Model']['Spin'],
             datatype=self.data_dict["type"],
-            add_graph_feat=self.data_dict.get("addFeat", False),
-            feat_json=self.data_dict.get("featJson"),
-            add_atom_feat=self.data_dict.get("addAtomFeat", False),
-            use_cycle=self.data_dict.get("useCycle", False),
         )
 
     def split_dataset(self, dataset: AtomsDataset) -> Tuple[AtomsDataset, AtomsDataset]:
@@ -146,10 +142,6 @@ class ASEParser(DatasetParser):
             cutoff=self.p_dict['cutoff'],
             properties=self.p_dict['Train']['targetProp'],
             spin=self.p_dict['Model']['Spin'],
-            add_graph_feat=self.data_dict.get("addFeat", False),
-            feat_json=self.data_dict.get("featJson"),
-            add_atom_feat=self.data_dict.get("addAtomFeat", False),
-            use_cycle=self.data_dict.get("useCycle", False),
         )
 
     def split_by_set(self, dataset):

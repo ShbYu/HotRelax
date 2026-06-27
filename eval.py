@@ -15,8 +15,8 @@ import time
 
 def eval(model, data_loader, properties, device, output="results.txt"):
     with open(output, 'w') as fileobj:
-        fileobj.write('cif_id\tmae_pos_dummy\tmae_pos_pred\tmae_cell_dummy\tmae_cell_pred\tmatch_rate\ttime\n')
-    
+        fileobj.write('cif_id\tmae_pos_dummy\tmae_pos_pred\tmae_cell_dummy\tmae_cell_pred\tmae_volume_dummy\tmae_volume_pred\tmatch_rate\ttime\n')
+
     pred_traj = Trajectory(f"pred_test.traj", 'a')
     for batch_data in data_loader:
         batch_data = {key: value.to(device) for key, value in batch_data.items()}
@@ -38,9 +38,6 @@ def eval(model, data_loader, properties, device, output="results.txt"):
         compute_time = end_time - start_time
 
         name = batch_data["ats_index"].cpu().numpy()[0]
-        volume_relax = torch.linalg.det(cell_relax)
-        volume_unrelax = torch.linalg.det(cell_unrelax)
-        pred_volume = torch.linalg.det(pred_cell)
 
         atoms_pred = Atoms(positions=pos_pred.cpu().numpy(), numbers=batch_data["atomic_number"].cpu().numpy(), cell=pred_cell.cpu().numpy(), pbc=np.array([1, 1, 1]))
         atoms_r = Atoms(positions=pos_relax.cpu().numpy(), numbers=batch_data["atomic_number"].cpu().numpy(), cell=cell_relax.cpu().numpy(), pbc=np.array([1, 1, 1]))
@@ -57,7 +54,7 @@ def eval(model, data_loader, properties, device, output="results.txt"):
 
         with open(output, 'a') as fileobj:
             content = str(name)+'\t'+str(mae_pos_dummy)+'\t'
-            content += str(mae_pos_pred)+'\t'+str(mae_cell_dummy)+'\t'+str(mae_cell_pred)+'\t'
+            content += str(mae_pos_pred)+'\t'+str(mae_cell_dummy)+'\t'+str(mae_cell_pred)+'\t'+'\t'
             content += str(match_rate)+'\t'+str(compute_time)+'\n'
             fileobj.write(content)
     pred_traj.close()
@@ -88,10 +85,7 @@ def main(*args, model_file='./outDir/best.pt', indices=None, input_file="input.y
                            datapath=datapath,
                            properties=properties,
                            spin=spin,
-                           indices=indices,
-                           add_feat=eval_dict["Data"].get("addFeat", False),
-                           feat_json=eval_dict["Data"].get("featJson"),
-                           use_cycle=eval_dict["Data"].get("useCycle", False))
+                           indices=indices,)
 
     data_loader = DataLoader(dataset,
                              batch_size=batchsize,

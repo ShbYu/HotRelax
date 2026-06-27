@@ -15,10 +15,6 @@ class ASEData(AtomsDataset):
         spin: bool = False,
         cutoff: float = 6.0,
         max_neigh: int = 20,
-        add_graph_feat: bool = False,
-        feat_json: str = None,
-        add_atom_feat: bool = False,
-        use_cycle: bool = False,
         *args,
         **kwargs,
     ) -> None:
@@ -49,10 +45,6 @@ class ASEData(AtomsDataset):
         self.properties = properties
         self.spin = spin
         self.max_neigh = max_neigh
-        self.add_graph_feat = add_graph_feat
-        self.feat_json = feat_json
-        self.add_atom_feat = add_atom_feat
-        self.use_cycle = use_cycle
 
     def __len__(self):
         if self.indices is None:
@@ -78,10 +70,6 @@ class ASEData(AtomsDataset):
             cutoff=self.cutoff,
             spin=self.spin,
             max_neigh=self.max_neigh,
-            add_graph_feat=self.add_graph_feat,
-            feat_json=self.feat_json,
-            add_atom_feat=self.add_atom_feat,
-            use_cycle=self.use_cycle,
         )
         return data
 

@@ -64,10 +64,6 @@ def main(
     properties=None,
     spin=False,
     max_neigh=20,
-    add_graph_feat=False,
-    feat_json=None,
-    add_atom_feat=False,
-    use_cycle=False,
     batchsize=32,
     num_workers=4,
     **kwargs,
@@ -87,10 +83,6 @@ def main(
         spin=spin,
         indices=indices,
         max_neigh=max_neigh,
-        add_graph_feat=add_graph_feat,
-        feat_json=feat_json,
-        add_atom_feat=add_atom_feat,
-        use_cycle=use_cycle,
     )
 
     data_loader = DataLoader(
@@ -121,16 +113,7 @@ def main(
         "n_data": len(dataset),
         "max_neigh": max_neigh,
     }
-    if add_graph_feat:
-        graph_feat_mean = collated_data["graph_feat"].mean(dim=0)
-        graph_feat_std = collated_data["graph_feat"].std(dim=0, unbiased=False)
-        meta_data["graph_feat_mean"] = graph_feat_mean
-        meta_data["graph_feat_std"] = graph_feat_std
-    if add_atom_feat:
-        atom_feat_mean = collated_data["atom_feat"].mean(dim=0)
-        atom_feat_std = collated_data["atom_feat"].std(dim=0, unbiased=False)
-        meta_data["atom_feat_mean"] = atom_feat_mean
-        meta_data["atom_feat_std"] = atom_feat_std
+
     torch.save((collated_data, collated_number, meta_data), os.path.join(datapath, "data.pt"))
 
 
@@ -140,16 +123,11 @@ if __name__ == "__main__":
     for mode in ["train", "val", "test"]:
         datapath_u = os.path.join(data_root, mode, "data.traj")
         datapath = os.path.join(data_root, mode)
-        feat_path = os.path.join(data_root, "feat.json")
         main(
             cutoff=6.0,
             datapath_u=datapath_u,
             datapath=datapath,
             max_neigh=50,
-            add_graph_feat=True,
-            feat_json=feat_path,
-            add_atom_feat=True,
-            use_cycle=False,
             batchsize=4,
             num_workers=num_workers,
         )

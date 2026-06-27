@@ -37,9 +37,6 @@ Model:
     nBasis: 8
     nHidden: [256, 256]
     activateFn: silu
-  useGraph: False
-  useAtomFeat: True
-  useCycle: False
 Train:
   warmupSteps: 500
   allowMissing: False
